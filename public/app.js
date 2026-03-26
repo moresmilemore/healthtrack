@@ -185,7 +185,8 @@ async function loadDashboard() {
     if (data.upcomingVisits.length > 0) {
       const next = data.upcomingVisits[0];
       const d = new Date(next.visit_date + 'T00:00:00');
-      document.getElementById('dash-visit').textContent = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const visitLabel = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      document.getElementById('dash-visit').textContent = next.visit_time ? visitLabel + ' ' + formatVisitTime(next.visit_time) : visitLabel;
     } else {
       document.getElementById('dash-visit').textContent = 'None';
     }
@@ -221,7 +222,7 @@ async function loadDashboard() {
         return `<div class="card ${urgency}">
           <div class="card-title">${esc(v.doctor_name)}</div>
           <div class="card-subtitle">${esc(v.specialty || '')}</div>
-          <div class="card-detail">\u{1F4C5} ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}${diff === 0 ? ' (Today!)' : diff === 1 ? ' (Tomorrow)' : ` (in ${diff} days)`}</div>
+          <div class="card-detail">\u{1F4C5} ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}${v.visit_time ? ' at ' + formatVisitTime(v.visit_time) : ''}${diff === 0 ? ' (Today!)' : diff === 1 ? ' (Tomorrow)' : ` (in ${diff} days)`}</div>
           ${v.reason ? `<div class="card-detail">\u{1F4DD} ${esc(v.reason)}</div>` : ''}
           <div class="card-actions"><button class="btn-calendar" onclick="addToCalendar('${v.id}')">Add to Calendar</button></div>
         </div>`;
@@ -577,14 +578,24 @@ async function loadVisits() {
   } catch (e) {}
 }
 
+function formatVisitTime(time) {
+  if (!time) return '';
+  const [h, m] = time.split(':');
+  const hr = parseInt(h);
+  const ampm = hr >= 12 ? 'PM' : 'AM';
+  const hr12 = hr % 12 || 12;
+  return `${hr12}:${m} ${ampm}`;
+}
+
 function renderVisitCard(v) {
   const d = new Date(v.visit_date + 'T00:00:00');
   const today = new Date().toISOString().split('T')[0];
   const isPast = v.visit_date < today;
+  const timeStr = v.visit_time ? ' at ' + formatVisitTime(v.visit_time) : '';
   return `<div class="card ${isPast ? 'card-past' : ''}">
     <div class="card-title">${esc(v.doctor_name)}</div>
     <div class="card-subtitle">${esc(v.specialty || 'General')}</div>
-    <div class="card-detail">\u{1F4C5} ${d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</div>
+    <div class="card-detail">\u{1F4C5} ${d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}${timeStr}</div>
     ${v.location ? `<div class="card-detail">\u{1F4CD} ${esc(v.location)}</div>` : ''}
     ${v.reason ? `<div class="card-detail">\u{1F4DD} ${esc(v.reason)}</div>` : ''}
     ${v.notes ? `<div class="card-detail">\u{1F4AC} ${esc(v.notes)}</div>` : ''}
@@ -619,9 +630,15 @@ function editVisit(id) {
         <label for="visit-specialty">Specialty</label>
         <input type="text" id="visit-specialty" value="${esc(v.specialty || '')}">
       </div>
-      <div class="form-group">
-        <label for="visit-date">Visit Date *</label>
-        <input type="date" id="visit-date" required value="${v.visit_date}">
+      <div class="form-group form-row">
+        <div class="form-col">
+          <label for="visit-date">Date *</label>
+          <input type="date" id="visit-date" required value="${v.visit_date}">
+        </div>
+        <div class="form-col">
+          <label for="visit-time">Time</label>
+          <input type="time" id="visit-time" value="${v.visit_time || ''}">
+        </div>
       </div>
       <div class="form-group">
         <label for="visit-location">Location</label>
@@ -649,6 +666,7 @@ function editVisit(id) {
       doctor_name: document.getElementById('visit-doctor').value,
       specialty: document.getElementById('visit-specialty').value,
       visit_date: document.getElementById('visit-date').value,
+      visit_time: document.getElementById('visit-time').value || null,
       location: document.getElementById('visit-location').value,
       reason: document.getElementById('visit-reason').value,
       notes: document.getElementById('visit-notes').value,
@@ -672,9 +690,15 @@ document.getElementById('add-visit-btn').addEventListener('click', () => {
         <label for="visit-specialty">Specialty</label>
         <input type="text" id="visit-specialty" placeholder="e.g. Cardiologist">
       </div>
-      <div class="form-group">
-        <label for="visit-date">Visit Date *</label>
-        <input type="date" id="visit-date" required value="${today}">
+      <div class="form-group form-row">
+        <div class="form-col">
+          <label for="visit-date">Date *</label>
+          <input type="date" id="visit-date" required value="${today}">
+        </div>
+        <div class="form-col">
+          <label for="visit-time">Time</label>
+          <input type="time" id="visit-time" placeholder="e.g. 10:30 AM">
+        </div>
       </div>
       <div class="form-group">
         <label for="visit-location">Location</label>
@@ -702,6 +726,7 @@ document.getElementById('add-visit-btn').addEventListener('click', () => {
       doctor_name: document.getElementById('visit-doctor').value,
       specialty: document.getElementById('visit-specialty').value,
       visit_date: document.getElementById('visit-date').value,
+      visit_time: document.getElementById('visit-time').value || null,
       location: document.getElementById('visit-location').value,
       reason: document.getElementById('visit-reason').value,
       notes: document.getElementById('visit-notes').value,
@@ -1105,12 +1130,7 @@ function addToCalendar(visitId) {
   const v = visits.find(x => x.id === visitId);
   if (!v) return;
 
-  const date = v.visit_date.replace(/-/g, '');
-  // End date should be next day for all-day events
-  const endDate = new Date(v.visit_date + 'T00:00:00');
-  endDate.setDate(endDate.getDate() + 1);
-  const endStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
-
+  const dateClean = v.visit_date.replace(/-/g, '');
   const now = new Date();
   const dtstamp = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   const uid = `healthtrack-${visitId}-${Date.now()}@healthtrack.app`;
@@ -1128,11 +1148,26 @@ function addToCalendar(visitId) {
     'METHOD:PUBLISH',
     'BEGIN:VEVENT',
     `UID:${uid}`,
-    `DTSTAMP:${dtstamp}`,
-    `DTSTART;VALUE=DATE:${date}`,
-    `DTEND;VALUE=DATE:${endStr}`,
-    `SUMMARY:${summary}`
+    `DTSTAMP:${dtstamp}`
   ];
+
+  if (v.visit_time) {
+    const timeClean = v.visit_time.replace(/:/g, '') + '00';
+    lines.push(`DTSTART:${dateClean}T${timeClean}`);
+    // 1 hour duration
+    const startH = parseInt(v.visit_time.split(':')[0]);
+    const endH = String(startH + 1).padStart(2, '0');
+    const endMin = v.visit_time.split(':')[1];
+    lines.push(`DTEND:${dateClean}T${endH}${endMin}00`);
+  } else {
+    const endDate = new Date(v.visit_date + 'T00:00:00');
+    endDate.setDate(endDate.getDate() + 1);
+    const endStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
+    lines.push(`DTSTART;VALUE=DATE:${dateClean}`);
+    lines.push(`DTEND;VALUE=DATE:${endStr}`);
+  }
+
+  lines.push(`SUMMARY:${summary}`);
 
   if (description) lines.push(`DESCRIPTION:${description}`);
   if (location) lines.push(`LOCATION:${location}`);

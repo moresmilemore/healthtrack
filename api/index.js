@@ -308,11 +308,11 @@ app.post('/api/visits', auth, async (req, res) => {
     const missing = requireFields(req.body, ['doctor_name', 'visit_date']);
     if (missing) return res.status(400).json({ error: `${missing} is required` });
     const db = await getDb();
-    const { doctor_name, specialty, visit_date, location, reason, notes, follow_up_date } = req.body;
+    const { doctor_name, specialty, visit_date, visit_time, location, reason, notes, follow_up_date } = req.body;
     const doc = {
       user_id: req.userId, doctor_name, specialty: specialty || null, visit_date,
-      location: location || null, reason: reason || null, notes: notes || null,
-      follow_up_date: follow_up_date || null, created_at: new Date()
+      visit_time: visit_time || null, location: location || null, reason: reason || null,
+      notes: notes || null, follow_up_date: follow_up_date || null, created_at: new Date()
     };
     const result = await db.collection('doctor_visits').insertOne(doc);
     res.json({ id: result.insertedId.toString(), ...doc });
@@ -328,10 +328,10 @@ app.put('/api/visits/:id', auth, async (req, res) => {
     const missing = requireFields(req.body, ['doctor_name', 'visit_date']);
     if (missing) return res.status(400).json({ error: `${missing} is required` });
     const db = await getDb();
-    const { doctor_name, specialty, visit_date, location, reason, notes, follow_up_date } = req.body;
+    const { doctor_name, specialty, visit_date, visit_time, location, reason, notes, follow_up_date } = req.body;
     await db.collection('doctor_visits').updateOne({ _id: oid, user_id: req.userId }, {
-      $set: { doctor_name, specialty: specialty || null, visit_date, location: location || null,
-        reason: reason || null, notes: notes || null, follow_up_date: follow_up_date || null }
+      $set: { doctor_name, specialty: specialty || null, visit_date, visit_time: visit_time || null,
+        location: location || null, reason: reason || null, notes: notes || null, follow_up_date: follow_up_date || null }
     });
     res.json({ success: true });
   } catch (err) {
@@ -468,8 +468,8 @@ app.get('/api/export', auth, async (req, res) => {
     meds.forEach(m => { csv += `"${m.name}","${m.dosage || ''}","${m.frequency || ''}","${m.time_of_day || ''}",${m.active ? 'Yes' : 'No'},"${(m.notes || '').replace(/"/g, '""')}"\n`; });
     csv += '\nMEDICATION LOGS\nMedication,Dosage,Date,Status,Notes\n';
     medLogs.forEach(l => { csv += `"${l.medication_name}","${l.dosage || ''}","${l.taken_at}",${l.skipped ? 'Skipped' : 'Taken'},"${(l.notes || '').replace(/"/g, '""')}"\n`; });
-    csv += '\nDOCTOR VISITS\nDoctor,Specialty,Date,Location,Reason,Notes,Follow-up\n';
-    visitsList.forEach(v => { csv += `"${v.doctor_name}","${v.specialty || ''}","${v.visit_date}","${v.location || ''}","${v.reason || ''}","${(v.notes || '').replace(/"/g, '""')}","${v.follow_up_date || ''}"\n`; });
+    csv += '\nDOCTOR VISITS\nDoctor,Specialty,Date,Time,Location,Reason,Notes,Follow-up\n';
+    visitsList.forEach(v => { csv += `"${v.doctor_name}","${v.specialty || ''}","${v.visit_date}","${v.visit_time || ''}","${v.location || ''}","${v.reason || ''}","${(v.notes || '').replace(/"/g, '""')}","${v.follow_up_date || ''}"\n`; });
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=healthtrack-export.csv');
