@@ -905,6 +905,30 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => {
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
 let voiceResult = '';
+let micStream = null;
+let micGranted = false;
+
+// Request mic permission once and keep the stream so the browser remembers the grant
+async function ensureMicPermission() {
+  if (micGranted) return true;
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micGranted = true;
+    localStorage.setItem('ht_mic_granted', '1');
+    return true;
+  } catch (err) {
+    toast('Microphone access is needed for voice commands');
+    return false;
+  }
+}
+
+// On load, if we previously granted, re-acquire silently so browser doesn't re-prompt
+if (localStorage.getItem('ht_mic_granted') === '1' && navigator.mediaDevices) {
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    micStream = stream;
+    micGranted = true;
+  }).catch(() => {});
+}
 
 if (SpeechRecognition) {
   recognition = new SpeechRecognition();
@@ -926,9 +950,16 @@ if (SpeechRecognition) {
     }
   };
 
-  recognition.onerror = () => {
-    document.getElementById('voice-status').textContent = 'Could not hear you. Try again.';
-    setTimeout(closeVoice, 1500);
+  recognition.onerror = (e) => {
+    if (e.error === 'not-allowed') {
+      document.getElementById('voice-status').textContent = 'Mic access denied';
+      document.getElementById('voice-transcript').textContent = 'Please allow microphone access in your browser settings';
+      micGranted = false;
+      localStorage.removeItem('ht_mic_granted');
+    } else {
+      document.getElementById('voice-status').textContent = 'Could not hear you. Try again.';
+    }
+    setTimeout(closeVoice, 2000);
   };
 
   recognition.onend = () => {
@@ -936,12 +967,13 @@ if (SpeechRecognition) {
   };
 }
 
-document.getElementById('voice-btn').addEventListener('click', () => {
+document.getElementById('voice-btn').addEventListener('click', async () => {
   if (!recognition) {
     toast('Voice not supported in this browser');
     return;
   }
-  openVoice();
+  const allowed = await ensureMicPermission();
+  if (allowed) openVoice();
 });
 
 document.getElementById('voice-cancel').addEventListener('click', closeVoice);
