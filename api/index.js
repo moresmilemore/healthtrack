@@ -5,7 +5,45 @@ const crypto = require('crypto');
 
 const app = express();
 
-app.use(express.json());
+// --- Security headers ---
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), payment=()');
+  next();
+});
+
+// --- Body size limit ---
+app.use(express.json({ limit: '16kb' }));
+
+// --- Rate limiting (in-memory, per IP) ---
+const rateLimits = new Map();
+function rateLimit(maxRequests, windowMs) {
+  return (req, res, next) => {
+    const ip = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+    const now = Date.now();
+    const entry = rateLimits.get(ip);
+    if (!entry || now - entry.start > windowMs) {
+      rateLimits.set(ip, { start: now, count: 1 });
+      return next();
+    }
+    entry.count++;
+    if (entry.count > maxRequests) {
+      return res.status(429).json({ error: 'Too many requests, slow down' });
+    }
+    next();
+  };
+}
+
+// Clean up rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimits) {
+    if (now - entry.start > 120000) rateLimits.delete(ip);
+  }
+}, 300000);
 
 // --- Database Setup ---
 let cachedDb = null;
@@ -68,14 +106,17 @@ function normalize(doc) {
 function normalizeAll(docs) { return docs.map(normalize); }
 
 // --- Auth API ---
-app.post('/api/auth/signup', async (req, res) => {
+app.post('/api/auth/signup', rateLimit(5, 60000), async (req, res) => {
   try {
     const missing = requireFields(req.body, ['username', 'password']);
     if (missing) return res.status(400).json({ error: `${missing} is required` });
 
     const { username, password, first_name, last_name } = req.body;
+    if (typeof username !== 'string' || typeof password !== 'string') return res.status(400).json({ error: 'Invalid input' });
     if (username.length < 3) return res.status(400).json({ error: 'Username must be at least 3 characters' });
+    if (username.length > 50) return res.status(400).json({ error: 'Username too long' });
     if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (password.length > 128) return res.status(400).json({ error: 'Password too long' });
 
     const db = await getDb();
     const existing = await db.collection('users').findOne({ username: username.toLowerCase() });
@@ -103,7 +144,7 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', rateLimit(10, 60000), async (req, res) => {
   try {
     const missing = requireFields(req.body, ['username', 'password']);
     if (missing) return res.status(400).json({ error: `${missing} is required` });
@@ -506,15 +547,15 @@ app.get('/api/export', auth, async (req, res) => {
 });
 
 // --- Voice AI (Gemini) ---
-app.post('/api/voice', auth, async (req, res) => {
+app.post('/api/voice', rateLimit(10, 60000), auth, async (req, res) => {
   try {
     const { transcript } = req.body;
-    if (!transcript || !transcript.trim()) return res.status(400).json({ error: 'No transcript provided' });
+    if (!transcript || typeof transcript !== 'string' || !transcript.trim()) return res.status(400).json({ error: 'No transcript provided' });
+    const cleanTranscript = transcript.trim().substring(0, 500);
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      console.error('GEMINI_API_KEY is not set. Available env vars:', Object.keys(process.env).filter(k => k.includes('GEMINI') || k.includes('gemini') || k.includes('API')).join(', ') || '(none matching)');
-      return res.status(500).json({ error: 'GEMINI_API_KEY environment variable is not set on the server' });
+      return res.status(500).json({ error: 'Voice AI is not configured' });
     }
 
     const db = await getDb();
@@ -576,7 +617,7 @@ Rules:
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: transcript }] }],
+          contents: [{ parts: [{ text: cleanTranscript }] }],
           systemInstruction: { parts: [{ text: systemPrompt }] },
           generationConfig: {
             temperature: 0.3,
@@ -590,9 +631,10 @@ Rules:
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
       console.error('Gemini API error:', geminiRes.status, errText);
-      let errMsg = '';
-      try { errMsg = JSON.parse(errText).error?.message || ''; } catch(e) { errMsg = errText.substring(0, 100); }
-      return res.status(502).json({ error: `Gemini ${geminiRes.status}: ${errMsg}` });
+      let errMsg = 'Voice AI temporarily unavailable';
+      if (geminiRes.status === 429) errMsg = 'Voice AI is busy, try again in a moment';
+      else if (geminiRes.status === 403) errMsg = 'Voice AI configuration error';
+      return res.status(502).json({ error: errMsg });
     }
 
     const geminiData = await geminiRes.json();
@@ -612,7 +654,7 @@ Rules:
     res.json(parsed);
   } catch (err) {
     console.error('Voice AI error:', err.message || err);
-    res.status(500).json({ error: 'Voice AI error: ' + (err.message || 'unknown') });
+    res.status(500).json({ error: 'Voice AI encountered an error' });
   }
 });
 
