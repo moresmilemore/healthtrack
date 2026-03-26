@@ -4,6 +4,7 @@ const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 
 const app = express();
+app.set('trust proxy', 1);
 
 // --- Security headers ---
 app.use((req, res, next) => {
@@ -12,6 +13,8 @@ app.use((req, res, next) => {
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), payment=()');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://generativelanguage.googleapis.com; img-src 'self' data: blob:; font-src 'self'; media-src 'self'; frame-ancestors 'none'");
   next();
 });
 
@@ -22,7 +25,7 @@ app.use(express.json({ limit: '16kb' }));
 const rateLimits = new Map();
 function rateLimit(maxRequests, windowMs) {
   return (req, res, next) => {
-    const ip = req.headers['x-forwarded-for'] || req.ip || 'unknown';
+    const ip = req.ip || 'unknown';
     const now = Date.now();
     const entry = rateLimits.get(ip);
     if (!entry || now - entry.start > windowMs) {
@@ -52,10 +55,14 @@ let dbConnectPromise = null;
 async function getDb() {
   if (cachedDb) return cachedDb;
   if (!dbConnectPromise) {
+    if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI not set');
     const client = new MongoClient(process.env.MONGODB_URI);
     dbConnectPromise = client.connect().then(() => {
       cachedDb = client.db(process.env.MONGODB_DB || 'healthtrack');
       return cachedDb;
+    }).catch(err => {
+      dbConnectPromise = null;
+      throw err;
     });
   }
   return dbConnectPromise;
@@ -334,8 +341,8 @@ app.get('/api/medication-logs', auth, async (req, res) => {
       { $sort: { taken_at: -1 } },
       { $limit: 50 },
       { $lookup: { from: 'medications', localField: 'medication_id', foreignField: '_id', as: 'med' }},
-      { $unwind: '$med' },
-      { $project: { _id: 1, medication_id: 1, taken_at: 1, skipped: 1, notes: 1, medication_name: '$med.name', dosage: '$med.dosage' }}
+      { $unwind: { path: '$med', preserveNullAndEmptyArrays: true } },
+      { $project: { _id: 1, medication_id: 1, taken_at: 1, skipped: 1, notes: 1, medication_name: { $ifNull: ['$med.name', '(Deleted)'] }, dosage: { $ifNull: ['$med.dosage', null] } }}
     ]).toArray();
     res.json(normalizeAll(logs));
   } catch (err) {
@@ -468,11 +475,13 @@ app.get('/api/dashboard', auth, async (req, res) => {
     const startOfDay = new Date(today + 'T00:00:00.000Z');
     const endOfDay = new Date(today + 'T23:59:59.999Z');
 
-    const activeMeds = await db.collection('medications').countDocuments({ user_id: req.userId, active: 1 });
-    const todayLogCount = await db.collection('medication_logs').countDocuments({ user_id: req.userId, taken_at: { $gte: startOfDay, $lte: endOfDay } });
-    const todayCheckinRows = await db.collection('checkins').find({ user_id: req.userId, date: today }).sort({ created_at: -1 }).limit(1).toArray();
-    const upcomingVisits = await db.collection('doctor_visits').find({ user_id: req.userId, visit_date: { $gte: today } }).sort({ visit_date: 1 }).limit(5).toArray();
-    const recentCheckins = await db.collection('checkins').find({ user_id: req.userId }, { projection: { date: 1, mood: 1, energy: 1, sleep_quality: 1, pain_level: 1 } }).sort({ date: -1 }).limit(7).toArray();
+    const [activeMeds, todayLogCount, todayCheckinRows, upcomingVisits, recentCheckins] = await Promise.all([
+      db.collection('medications').countDocuments({ user_id: req.userId, active: 1 }),
+      db.collection('medication_logs').countDocuments({ user_id: req.userId, taken_at: { $gte: startOfDay, $lte: endOfDay } }),
+      db.collection('checkins').find({ user_id: req.userId, date: today }).sort({ created_at: -1 }).limit(1).toArray(),
+      db.collection('doctor_visits').find({ user_id: req.userId, visit_date: { $gte: today } }).sort({ visit_date: 1 }).limit(5).toArray(),
+      db.collection('checkins').find({ user_id: req.userId }, { projection: { date: 1, mood: 1, energy: 1, sleep_quality: 1, pain_level: 1 } }).sort({ date: -1 }).limit(7).toArray()
+    ]);
 
     res.json({ activeMeds, todayLogCount, todayCheckin: todayCheckinRows[0] ? normalize(todayCheckinRows[0]) : null, upcomingVisits: normalizeAll(upcomingVisits), recentCheckins: normalizeAll(recentCheckins) });
   } catch (err) {
@@ -651,6 +660,48 @@ Rules:
       console.error('Gemini JSON parse error:', responseText);
       return res.json({ action: 'reply', message: responseText });
     }
+
+    // --- Validate AI response server-side ---
+    const validActions = ['log_med', 'add_med', 'checkin', 'add_visit', 'navigate', 'reply'];
+    if (!parsed.action || !validActions.includes(parsed.action)) {
+      parsed = { action: 'reply', message: parsed.message || 'I didn\'t understand that' };
+    }
+
+    // Validate medication ownership for log_med
+    if (parsed.action === 'log_med' && parsed.medication_id) {
+      const medOid = parseObjectId(parsed.medication_id);
+      if (!medOid) {
+        return res.json({ action: 'reply', message: 'Could not find that medication' });
+      }
+      const med = await db.collection('medications').findOne({ _id: medOid, user_id: req.userId });
+      if (!med) {
+        return res.json({ action: 'reply', message: 'Medication not found in your account' });
+      }
+    }
+
+    // Validate navigate page
+    if (parsed.action === 'navigate') {
+      const validPages = ['dashboard', 'meds', 'visits', 'checkin', 'history'];
+      if (!validPages.includes(parsed.page)) {
+        parsed.page = 'dashboard';
+      }
+    }
+
+    // Clamp numeric values for checkin
+    if (parsed.action === 'checkin') {
+      parsed.mood = Math.min(5, Math.max(1, Number(parsed.mood) || 3));
+      parsed.energy = Math.min(5, Math.max(1, Number(parsed.energy) || 3));
+      parsed.sleep_quality = Math.min(5, Math.max(1, Number(parsed.sleep_quality) || 3));
+      parsed.pain_level = Math.min(10, Math.max(0, Number(parsed.pain_level) || 0));
+    }
+
+    // Truncate all string fields
+    for (const key of Object.keys(parsed)) {
+      if (typeof parsed[key] === 'string') {
+        parsed[key] = parsed[key].substring(0, 500);
+      }
+    }
+
     res.json(parsed);
   } catch (err) {
     console.error('Voice AI error:', err.message || err);

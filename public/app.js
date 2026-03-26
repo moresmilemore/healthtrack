@@ -952,14 +952,14 @@ document.getElementById('modal-overlay').addEventListener('click', (e) => {
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
 let voiceResult = '';
-let micStream = null;
 let micGranted = false;
 
-// Request mic permission once and keep the stream so the browser remembers the grant
+// Request mic permission and release the stream immediately
 async function ensureMicPermission() {
   if (micGranted) return true;
   try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach(t => t.stop());
     micGranted = true;
     localStorage.setItem('ht_mic_granted', '1');
     return true;
@@ -969,12 +969,9 @@ async function ensureMicPermission() {
   }
 }
 
-// On load, if we previously granted, re-acquire silently so browser doesn't re-prompt
-if (localStorage.getItem('ht_mic_granted') === '1' && navigator.mediaDevices) {
-  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
-    micStream = stream;
-    micGranted = true;
-  }).catch(() => {});
+// Check if we previously had permission (browser remembers the grant)
+if (localStorage.getItem('ht_mic_granted') === '1') {
+  micGranted = true;
 }
 
 let voiceProcessed = false;
@@ -1177,8 +1174,10 @@ async function executeVoiceAction(result) {
         break;
 
       case 'navigate':
+        const validPages = ['dashboard', 'meds', 'visits', 'checkin', 'history'];
+        const targetPage = validPages.includes(result.page) ? result.page : 'dashboard';
         status.textContent = result.message || 'Opening...';
-        setTimeout(() => { closeVoice(); navigateTo(result.page || 'dashboard'); }, 600);
+        setTimeout(() => { closeVoice(); navigateTo(targetPage); }, 600);
         break;
 
       case 'reply':
@@ -1314,19 +1313,29 @@ function confirmAction(title, message) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'confirm-overlay';
-    overlay.innerHTML = `
-      <div class="confirm-dialog">
-        <h3>${title}</h3>
-        <p>${message}</p>
-        <div class="confirm-actions">
-          <button class="confirm-cancel">Cancel</button>
-          <button class="confirm-delete">Delete</button>
-        </div>
-      </div>
-    `;
+    const dialog = document.createElement('div');
+    dialog.className = 'confirm-dialog';
+    const h3 = document.createElement('h3');
+    h3.textContent = title;
+    const p = document.createElement('p');
+    p.textContent = message;
+    const actions = document.createElement('div');
+    actions.className = 'confirm-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'confirm-cancel';
+    cancelBtn.textContent = 'Cancel';
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'confirm-delete';
+    deleteBtn.textContent = 'Delete';
+    actions.appendChild(cancelBtn);
+    actions.appendChild(deleteBtn);
+    dialog.appendChild(h3);
+    dialog.appendChild(p);
+    dialog.appendChild(actions);
+    overlay.appendChild(dialog);
     document.body.appendChild(overlay);
-    overlay.querySelector('.confirm-cancel').addEventListener('click', () => { overlay.remove(); resolve(false); });
-    overlay.querySelector('.confirm-delete').addEventListener('click', () => { overlay.remove(); resolve(true); });
+    cancelBtn.addEventListener('click', () => { overlay.remove(); resolve(false); });
+    deleteBtn.addEventListener('click', () => { overlay.remove(); resolve(true); });
     overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
   });
 }
@@ -1339,7 +1348,6 @@ function esc(str) {
 }
 
 // --- Scroll-aware header ---
-let lastScrollY = 0;
 window.addEventListener('scroll', () => {
   const header = document.querySelector('.app-header');
   if (window.scrollY > 10) {
@@ -1347,7 +1355,6 @@ window.addEventListener('scroll', () => {
   } else {
     header.classList.remove('scrolled');
   }
-  lastScrollY = window.scrollY;
 }, { passive: true });
 
 // --- Init ---
