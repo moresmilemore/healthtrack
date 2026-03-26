@@ -505,6 +505,16 @@ app.get('/api/export', auth, async (req, res) => {
   }
 });
 
+// --- Debug: check if Gemini key is set ---
+app.get('/api/voice-status', (req, res) => {
+  const key = process.env.GEMINI_API_KEY;
+  res.json({
+    keySet: !!key,
+    keyPrefix: key ? key.substring(0, 8) + '...' : null,
+    keyLength: key ? key.length : 0
+  });
+});
+
 // --- Voice AI (Gemini) ---
 app.post('/api/voice', auth, async (req, res) => {
   try {
