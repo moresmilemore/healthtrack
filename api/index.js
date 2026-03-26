@@ -600,18 +600,16 @@ Rules:
     if (!geminiRes.ok) {
       const errText = await geminiRes.text();
       console.error('Gemini API error:', geminiRes.status, errText);
-      let hint = 'Voice AI temporarily unavailable';
-      if (geminiRes.status === 400) hint = 'Gemini API rejected the request';
-      if (geminiRes.status === 403) hint = 'Gemini API key is invalid or expired';
-      if (geminiRes.status === 429) hint = 'Gemini rate limit hit, try again in a moment';
-      return res.json({ action: 'fallback', message: hint });
+      let errMsg = '';
+      try { errMsg = JSON.parse(errText).error?.message || ''; } catch(e) { errMsg = errText.substring(0, 100); }
+      return res.status(502).json({ error: `Gemini ${geminiRes.status}: ${errMsg}` });
     }
 
     const geminiData = await geminiRes.json();
     const responseText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!responseText) {
       console.error('Gemini empty response:', JSON.stringify(geminiData));
-      return res.json({ action: 'fallback', message: 'Gemini returned an empty response' });
+      return res.status(502).json({ error: 'Gemini returned an empty response' });
     }
 
     let parsed;
@@ -624,7 +622,7 @@ Rules:
     res.json(parsed);
   } catch (err) {
     console.error('Voice AI error:', err.message || err);
-    res.json({ action: 'fallback', message: 'Voice AI error: ' + (err.message || 'unknown') });
+    res.status(500).json({ error: 'Voice AI error: ' + (err.message || 'unknown') });
   }
 });
 

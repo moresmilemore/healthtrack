@@ -1107,20 +1107,12 @@ async function processVoiceCommand(text) {
       body: JSON.stringify({ transcript: text })
     });
 
-    if (!res.ok) {
-      const errData = await res.json().catch(() => ({}));
-      status.textContent = errData.error || 'Voice AI error';
-      transcriptEl.textContent = 'Check that GEMINI_API_KEY is set in your environment';
-      setTimeout(closeVoice, 3000);
-      return;
-    }
-
     const result = await res.json();
 
-    if (result.action === 'fallback') {
-      status.textContent = result.message || 'Voice AI not available';
-      transcriptEl.textContent = 'Make sure GEMINI_API_KEY is configured';
-      setTimeout(closeVoice, 3000);
+    if (!res.ok) {
+      status.textContent = 'Voice AI Error';
+      transcriptEl.textContent = result.error || 'Unknown error';
+      setTimeout(closeVoice, 4000);
       return;
     }
 
