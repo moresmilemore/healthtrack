@@ -513,7 +513,8 @@ app.post('/api/voice', auth, async (req, res) => {
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return res.json({ action: 'fallback', message: 'Voice AI not configured' });
+      console.error('GEMINI_API_KEY is not set. Available env vars:', Object.keys(process.env).filter(k => k.includes('GEMINI') || k.includes('gemini') || k.includes('API')).join(', ') || '(none matching)');
+      return res.status(500).json({ error: 'GEMINI_API_KEY environment variable is not set on the server' });
     }
 
     const db = await getDb();
@@ -570,7 +571,7 @@ Rules:
 - If unsure, use "reply" action with a helpful clarification`;
 
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
