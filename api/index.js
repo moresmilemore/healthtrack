@@ -505,51 +505,6 @@ app.get('/api/export', auth, async (req, res) => {
   }
 });
 
-// --- Debug: check if Gemini key is set + smoke test ---
-app.get('/api/voice-status', async (req, res) => {
-  const key = process.env.GEMINI_API_KEY;
-  const status = {
-    keySet: !!key,
-    keyPrefix: key ? key.substring(0, 8) + '...' : null,
-    keyLength: key ? key.length : 0
-  };
-
-  if (!key) {
-    status.test = 'FAIL: No API key set';
-    return res.json(status);
-  }
-
-  // Smoke test: make a minimal Gemini call
-  try {
-    const testRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Reply with exactly: OK' }] }],
-          generationConfig: { maxOutputTokens: 10 }
-        })
-      }
-    );
-    if (testRes.ok) {
-      const data = await testRes.json();
-      const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      status.test = 'PASS';
-      status.reply = reply.trim();
-    } else {
-      const errText = await testRes.text();
-      let errMsg = '';
-      try { errMsg = JSON.parse(errText).error?.message || ''; } catch(e) { errMsg = errText.substring(0, 200); }
-      status.test = `FAIL ${testRes.status}: ${errMsg}`;
-    }
-  } catch (e) {
-    status.test = `FAIL: ${e.message}`;
-  }
-
-  res.json(status);
-});
-
 // --- Voice AI (Gemini) ---
 app.post('/api/voice', auth, async (req, res) => {
   try {
