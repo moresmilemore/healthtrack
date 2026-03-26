@@ -60,60 +60,72 @@ function navigateTo(page) {
 
 // --- Dashboard ---
 async function loadDashboard() {
-  const data = await api('/dashboard');
-  const activeMeds = await api('/medications/active');
+  try {
+    const data = await api('/dashboard');
+    const activeMeds = await api('/medications/active');
 
-  const moodEmojis = ['', '\u{1F629}', '\u{1F61E}', '\u{1F610}', '\u{1F642}', '\u{1F601}'];
-  document.getElementById('dash-mood').textContent = data.todayCheckin ? moodEmojis[data.todayCheckin.mood] : '--';
-  document.getElementById('dash-meds').textContent = `${data.todayLogCount}/${data.activeMeds}`;
-  document.getElementById('dash-energy').textContent = data.todayCheckin ? `${data.todayCheckin.energy}/5` : '--';
+    const moodEmojis = ['', '\u{1F629}', '\u{1F61E}', '\u{1F610}', '\u{1F642}', '\u{1F601}'];
+    document.getElementById('dash-mood').textContent = data.todayCheckin ? moodEmojis[data.todayCheckin.mood] : '--';
+    document.getElementById('dash-meds').textContent = `${data.todayLogCount}/${data.activeMeds}`;
+    document.getElementById('dash-energy').textContent = data.todayCheckin ? `${data.todayCheckin.energy}/5` : '--';
 
-  if (data.upcomingVisits.length > 0) {
-    const next = data.upcomingVisits[0];
-    const d = new Date(next.visit_date + 'T00:00:00');
-    document.getElementById('dash-visit').textContent = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  } else {
-    document.getElementById('dash-visit').textContent = 'None';
+    if (data.upcomingVisits.length > 0) {
+      const next = data.upcomingVisits[0];
+      const d = new Date(next.visit_date + 'T00:00:00');
+      document.getElementById('dash-visit').textContent = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } else {
+      document.getElementById('dash-visit').textContent = 'None';
+    }
+
+    // Quick med log
+    const quickMeds = document.getElementById('dash-quick-meds');
+    if (activeMeds.length === 0) {
+      quickMeds.innerHTML = '<div class="empty-state" style="padding:16px"><p>No active medications</p></div>';
+    } else {
+      quickMeds.innerHTML = activeMeds.map(m => {
+        const statusClass = m.todayStatus === 'taken' ? 'quick-med-taken' :
+                            m.todayStatus === 'skipped' ? 'quick-med-skipped' : '';
+        const statusIcon = m.todayStatus === 'taken' ? '\u2705' :
+                           m.todayStatus === 'skipped' ? '\u274C' : '\u{1F48A}';
+        return `<button class="quick-med-pill ${statusClass}" onclick="quickLogMed('${m.id}', '${m.todayStatus}')">
+          <span class="quick-med-icon">${statusIcon}</span>
+          <span class="quick-med-name">${esc(m.name)}</span>
+          <span class="quick-med-dose">${esc(m.dosage || '')}</span>
+        </button>`;
+      }).join('');
+    }
+
+    // Upcoming visits
+    const visitsList = document.getElementById('dash-upcoming-visits');
+    if (data.upcomingVisits.length === 0) {
+      visitsList.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F3E5}</div><p>No upcoming visits</p></div>';
+    } else {
+      visitsList.innerHTML = data.upcomingVisits.map(v => {
+        const d = new Date(v.visit_date + 'T00:00:00');
+        const today = new Date();
+        const diff = Math.ceil((d - new Date(today.toISOString().split('T')[0] + 'T00:00:00')) / (1000 * 60 * 60 * 24));
+        const urgency = diff <= 1 ? 'visit-today' : diff <= 3 ? 'visit-soon' : '';
+        return `<div class="card ${urgency}">
+          <div class="card-title">${esc(v.doctor_name)}</div>
+          <div class="card-subtitle">${esc(v.specialty || '')}</div>
+          <div class="card-detail">\u{1F4C5} ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}${diff === 0 ? ' (Today!)' : diff === 1 ? ' (Tomorrow)' : ` (in ${diff} days)`}</div>
+          ${v.reason ? `<div class="card-detail">\u{1F4DD} ${esc(v.reason)}</div>` : ''}
+          <div class="card-actions"><button class="btn-take" onclick="addToCalendar('${v.id}')">Add to Calendar</button></div>
+        </div>`;
+      }).join('');
+    }
+
+    // Store upcoming visits so addToCalendar works from dashboard
+    if (data.upcomingVisits.length > 0) {
+      data.upcomingVisits.forEach(v => {
+        if (!visits.find(x => x.id === v.id)) visits.push(v);
+      });
+    }
+
+    drawMoodChart(data.recentCheckins.reverse());
+  } catch (e) {
+    // Toast already shown by api(), just prevent crash
   }
-
-  // Quick med log
-  const quickMeds = document.getElementById('dash-quick-meds');
-  if (activeMeds.length === 0) {
-    quickMeds.innerHTML = '<div class="empty-state" style="padding:16px"><p>No active medications</p></div>';
-  } else {
-    quickMeds.innerHTML = activeMeds.map(m => {
-      const statusClass = m.todayStatus === 'taken' ? 'quick-med-taken' :
-                          m.todayStatus === 'skipped' ? 'quick-med-skipped' : '';
-      const statusIcon = m.todayStatus === 'taken' ? '\u2705' :
-                         m.todayStatus === 'skipped' ? '\u274C' : '\u{1F48A}';
-      return `<button class="quick-med-pill ${statusClass}" onclick="quickLogMed('${m.id}', '${m.todayStatus}')">
-        <span class="quick-med-icon">${statusIcon}</span>
-        <span class="quick-med-name">${esc(m.name)}</span>
-        <span class="quick-med-dose">${esc(m.dosage || '')}</span>
-      </button>`;
-    }).join('');
-  }
-
-  // Upcoming visits
-  const visitsList = document.getElementById('dash-upcoming-visits');
-  if (data.upcomingVisits.length === 0) {
-    visitsList.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F3E5}</div><p>No upcoming visits</p></div>';
-  } else {
-    visitsList.innerHTML = data.upcomingVisits.map(v => {
-      const d = new Date(v.visit_date + 'T00:00:00');
-      const today = new Date();
-      const diff = Math.ceil((d - new Date(today.toISOString().split('T')[0] + 'T00:00:00')) / (1000 * 60 * 60 * 24));
-      const urgency = diff <= 1 ? 'visit-today' : diff <= 3 ? 'visit-soon' : '';
-      return `<div class="card ${urgency}">
-        <div class="card-title">${esc(v.doctor_name)}</div>
-        <div class="card-subtitle">${esc(v.specialty || '')}</div>
-        <div class="card-detail">\u{1F4C5} ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}${diff === 0 ? ' (Today!)' : diff === 1 ? ' (Tomorrow)' : ` (in ${diff} days)`}</div>
-        ${v.reason ? `<div class="card-detail">\u{1F4DD} ${esc(v.reason)}</div>` : ''}
-      </div>`;
-    }).join('');
-  }
-
-  drawMoodChart(data.recentCheckins.reverse());
 }
 
 async function quickLogMed(id, currentStatus) {
@@ -221,6 +233,7 @@ function drawMoodChart(checkins) {
 
 // --- Medications ---
 async function loadMeds() {
+  try {
   medications = await api('/medications');
   const logs = await api('/medication-logs');
 
@@ -274,6 +287,7 @@ async function loadMeds() {
       </div>`;
     }).join('');
   }
+  } catch (e) {}
 }
 
 async function logMed(id, skipped) {
@@ -417,28 +431,30 @@ document.getElementById('add-med-btn').addEventListener('click', () => {
 
 // --- Doctor Visits ---
 async function loadVisits() {
-  visits = await api('/visits');
-  const list = document.getElementById('visits-list');
-  const today = new Date().toISOString().split('T')[0];
+  try {
+    visits = await api('/visits');
+    const list = document.getElementById('visits-list');
+    const today = new Date().toISOString().split('T')[0];
 
-  if (visits.length === 0) {
-    list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F3E5}</div><p>No visits logged yet.<br>Tap + to add one.</p></div>';
-  } else {
-    // Separate upcoming and past
-    const upcoming = visits.filter(v => v.visit_date >= today);
-    const past = visits.filter(v => v.visit_date < today);
+    if (visits.length === 0) {
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F3E5}</div><p>No visits logged yet.<br>Tap + to add one.</p></div>';
+    } else {
+      // Separate upcoming and past
+      const upcoming = visits.filter(v => v.visit_date >= today);
+      const past = visits.filter(v => v.visit_date < today);
 
-    let html = '';
-    if (upcoming.length > 0) {
-      html += '<div class="section-header"><h2>Upcoming</h2></div>';
-      html += upcoming.reverse().map(v => renderVisitCard(v)).join('');
+      let html = '';
+      if (upcoming.length > 0) {
+        html += '<div class="section-header"><h2>Upcoming</h2></div>';
+        html += upcoming.reverse().map(v => renderVisitCard(v)).join('');
+      }
+      if (past.length > 0) {
+        html += '<div class="section-header" style="margin-top:20px"><h2>Past Visits</h2></div>';
+        html += past.map(v => renderVisitCard(v)).join('');
+      }
+      list.innerHTML = html;
     }
-    if (past.length > 0) {
-      html += '<div class="section-header" style="margin-top:20px"><h2>Past Visits</h2></div>';
-      html += past.map(v => renderVisitCard(v)).join('');
-    }
-    list.innerHTML = html;
-  }
+  } catch (e) {}
 }
 
 function renderVisitCard(v) {
@@ -454,6 +470,7 @@ function renderVisitCard(v) {
     ${v.notes ? `<div class="card-detail">\u{1F4AC} ${esc(v.notes)}</div>` : ''}
     ${v.follow_up_date ? `<div class="card-detail">\u{1F501} Follow-up: ${new Date(v.follow_up_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>` : ''}
     <div class="card-actions">
+      <button class="btn-take" onclick="addToCalendar('${v.id}')">Add to Calendar</button>
       <button class="btn-edit" onclick="editVisit('${v.id}')">Edit</button>
       <button class="btn-delete" onclick="deleteVisit('${v.id}')">Delete</button>
     </div>
@@ -619,30 +636,32 @@ document.getElementById('checkin-form').addEventListener('submit', async (e) => 
 });
 
 async function loadCheckins() {
-  checkins = await api('/checkins');
-  const list = document.getElementById('checkins-list');
-  if (checkins.length === 0) {
-    list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F60A}</div><p>No check-ins yet.<br>Log how you\'re feeling above!</p></div>';
-  } else {
-    const moodEmojis = ['', '\u{1F629}', '\u{1F61E}', '\u{1F610}', '\u{1F642}', '\u{1F601}'];
-    list.innerHTML = checkins.map(c => {
-      const d = new Date(c.date + 'T00:00:00');
-      return `<div class="card checkin-card">
-        <div class="card-title">${d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</div>
-        <div class="mood-bar">
-          <div class="mood-bar-item"><span class="bar-value">${moodEmojis[c.mood]}</span>Mood</div>
-          <div class="mood-bar-item"><span class="bar-value">${c.energy}/5</span>Energy</div>
-          <div class="mood-bar-item"><span class="bar-value">${c.sleep_quality}/5</span>Sleep</div>
-          <div class="mood-bar-item"><span class="bar-value">${c.pain_level}/10</span>Pain</div>
-        </div>
-        ${c.symptoms ? `<div class="card-detail" style="margin-top:8px">\u{1F912} ${esc(c.symptoms)}</div>` : ''}
-        ${c.notes ? `<div class="card-detail">\u{1F4DD} ${esc(c.notes)}</div>` : ''}
-        <div class="card-actions">
-          <button class="btn-delete" onclick="deleteCheckin('${c.id}')">Delete</button>
-        </div>
-      </div>`;
-    }).join('');
-  }
+  try {
+    checkins = await api('/checkins');
+    const list = document.getElementById('checkins-list');
+    if (checkins.length === 0) {
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F60A}</div><p>No check-ins yet.<br>Log how you\'re feeling above!</p></div>';
+    } else {
+      const moodEmojis = ['', '\u{1F629}', '\u{1F61E}', '\u{1F610}', '\u{1F642}', '\u{1F601}'];
+      list.innerHTML = checkins.map(c => {
+        const d = new Date(c.date + 'T00:00:00');
+        return `<div class="card checkin-card">
+          <div class="card-title">${d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</div>
+          <div class="mood-bar">
+            <div class="mood-bar-item"><span class="bar-value">${moodEmojis[c.mood]}</span>Mood</div>
+            <div class="mood-bar-item"><span class="bar-value">${c.energy}/5</span>Energy</div>
+            <div class="mood-bar-item"><span class="bar-value">${c.sleep_quality}/5</span>Sleep</div>
+            <div class="mood-bar-item"><span class="bar-value">${c.pain_level}/10</span>Pain</div>
+          </div>
+          ${c.symptoms ? `<div class="card-detail" style="margin-top:8px">\u{1F912} ${esc(c.symptoms)}</div>` : ''}
+          ${c.notes ? `<div class="card-detail">\u{1F4DD} ${esc(c.notes)}</div>` : ''}
+          <div class="card-actions">
+            <button class="btn-delete" onclick="deleteCheckin('${c.id}')">Delete</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+  } catch (e) {}
 }
 
 async function deleteCheckin(id) {
@@ -655,36 +674,38 @@ async function deleteCheckin(id) {
 
 // --- History / Timeline ---
 async function loadTimeline() {
-  const events = await api('/timeline?filter=' + timelineFilter);
-  const list = document.getElementById('timeline-list');
+  try {
+    const events = await api('/timeline?filter=' + timelineFilter);
+    const list = document.getElementById('timeline-list');
 
-  if (events.length === 0) {
-    list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F4CB}</div><p>No health events yet</p></div>';
-  } else {
-    // Group by date
-    const grouped = {};
-    events.forEach(e => {
-      const dateKey = String(e.date).split('T')[0];
-      if (!grouped[dateKey]) grouped[dateKey] = [];
-      grouped[dateKey].push(e);
-    });
+    if (events.length === 0) {
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F4CB}</div><p>No health events yet</p></div>';
+    } else {
+      // Group by date
+      const grouped = {};
+      events.forEach(e => {
+        const dateKey = String(e.date).split('T')[0];
+        if (!grouped[dateKey]) grouped[dateKey] = [];
+        grouped[dateKey].push(e);
+      });
 
-    list.innerHTML = Object.entries(grouped).map(([date, items]) => {
-      const d = new Date(date + 'T00:00:00');
-      return `
-        <div class="timeline-date">${d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</div>
-        ${items.map(item => `
-          <div class="card timeline-card timeline-${item.type}">
-            <div class="timeline-icon">${item.icon}</div>
-            <div class="timeline-content">
-              <div class="card-title">${esc(item.title)}</div>
-              <div class="card-detail">${esc(item.detail)}</div>
+      list.innerHTML = Object.entries(grouped).map(([date, items]) => {
+        const d = new Date(date + 'T00:00:00');
+        return `
+          <div class="timeline-date">${d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+          ${items.map(item => `
+            <div class="card timeline-card timeline-${item.type}">
+              <div class="timeline-icon">${item.icon}</div>
+              <div class="timeline-content">
+                <div class="card-title">${esc(item.title)}</div>
+                <div class="card-detail">${esc(item.detail)}</div>
+              </div>
             </div>
-          </div>
-        `).join('')}
-      `;
-    }).join('');
-  }
+          `).join('')}
+        `;
+      }).join('');
+    }
+  } catch (e) {}
 }
 
 // Timeline filter chips
@@ -943,6 +964,43 @@ async function setupReminders() {
       });
     }
   }, 30 * 60 * 1000);
+}
+
+// --- Calendar Integration ---
+function addToCalendar(visitId) {
+  const v = visits.find(x => x.id === visitId);
+  if (!v) return;
+
+  const date = v.visit_date.replace(/-/g, '');
+  const summary = `Dr. Visit: ${v.doctor_name}${v.specialty ? ' (' + v.specialty + ')' : ''}`;
+  const description = [v.reason, v.notes].filter(Boolean).join('\\n');
+  const location = v.location || '';
+
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//HealthTrack//EN',
+    'BEGIN:VEVENT',
+    `DTSTART;VALUE=DATE:${date}`,
+    `DTEND;VALUE=DATE:${date}`,
+    `SUMMARY:${summary}`,
+    description ? `DESCRIPTION:${description}` : '',
+    location ? `LOCATION:${location}` : '',
+    v.follow_up_date ? `BEGIN:VALARM\nTRIGGER;VALUE=DATE-TIME:${v.follow_up_date.replace(/-/g, '')}T090000Z\nACTION:DISPLAY\nDESCRIPTION:Follow-up reminder\nEND:VALARM` : '',
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].filter(Boolean).join('\r\n');
+
+  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `visit-${v.doctor_name.replace(/\s+/g, '-').toLowerCase()}-${v.visit_date}.ics`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Calendar event downloaded!', 'success');
 }
 
 // --- Utilities ---
