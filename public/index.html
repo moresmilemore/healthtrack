@@ -54,7 +54,7 @@
             <line x1="8" y1="23" x2="16" y2="23"/>
           </svg>
         </button>
-        <button class="user-menu-btn" id="user-menu-btn" onclick="if(confirm('Log out?')) logout()">
+        <button class="user-menu-btn" id="user-menu-btn" onclick="confirmAction('Log Out', 'Are you sure you want to log out?').then(ok => ok && logout())">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <span id="user-display"></span>
         </button>
@@ -162,7 +162,7 @@
 
       <!-- Medications -->
       <section class="page" id="page-meds">
-        <button class="fab" id="add-med-btn">+</button>
+        <button class="fab" id="add-med-btn" aria-label="Add medication">+</button>
         <div class="voice-hints" onclick="document.getElementById('voice-btn').click()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
           Try: "Add medication Ibuprofen 200mg" or "I took my Advil"
@@ -180,7 +180,7 @@
 
       <!-- Doctor Visits -->
       <section class="page" id="page-visits">
-        <button class="fab" id="add-visit-btn">+</button>
+        <button class="fab" id="add-visit-btn" aria-label="Add doctor visit">+</button>
         <div class="voice-hints" onclick="document.getElementById('voice-btn').click()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
           Try: "Doctor appointment with Dr. Smith tomorrow"
@@ -310,7 +310,7 @@
       <div class="modal" id="modal">
         <div class="modal-header">
           <h2 id="modal-title">Add</h2>
-          <button class="modal-close" id="modal-close">&times;</button>
+          <button class="modal-close" id="modal-close" aria-label="Close">&times;</button>
         </div>
         <div class="modal-body" id="modal-body"></div>
       </div>

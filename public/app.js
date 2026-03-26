@@ -363,7 +363,7 @@ async function loadMeds() {
     list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F48A}</div><p>No medications yet</p><p class="empty-hint" onclick="document.getElementById(\'voice-btn\').click()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg> Say "Add medication Ibuprofen" or tap +</p></div>';
   } else {
     list.innerHTML = medications.filter(m => m.active).map(m => `
-      <div class="card card-swipeable">
+      <div class="card">
         <div class="card-title">${esc(m.name)} <span class="badge badge-active">Active</span></div>
         <div class="card-subtitle">${esc(m.dosage || '')} ${m.frequency ? '&bull; ' + esc(m.frequency) : ''}</div>
         ${m.time_of_day ? `<div class="card-detail">\u{23F0} ${esc(m.time_of_day)}</div>` : ''}
@@ -418,7 +418,8 @@ async function logMed(id, skipped) {
 }
 
 async function deleteMed(id) {
-  if (confirm('Delete this medication?')) {
+  const ok = await confirmAction('Delete Medication', 'This will permanently remove this medication and all its logs.');
+  if (ok) {
     await api('/medications/' + id, 'DELETE');
     toast('Medication deleted');
     loadMeds();
@@ -609,7 +610,8 @@ function renderVisitCard(v) {
 }
 
 async function deleteVisit(id) {
-  if (confirm('Delete this visit?')) {
+  const ok = await confirmAction('Delete Visit', 'This will permanently remove this doctor visit.');
+  if (ok) {
     await api('/visits/' + id, 'DELETE');
     toast('Visit deleted');
     loadVisits();
@@ -810,7 +812,8 @@ async function loadCheckins() {
 }
 
 async function deleteCheckin(id) {
-  if (confirm('Delete this check-in?')) {
+  const ok = await confirmAction('Delete Check-in', 'This will permanently remove this check-in entry.');
+  if (ok) {
     await api('/checkins/' + id, 'DELETE');
     toast('Check-in deleted');
     loadCheckins();
@@ -1226,6 +1229,28 @@ function addToCalendar(visitId) {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
   toast('Opening in Calendar...', 'success');
+}
+
+// --- Custom Confirm Dialog ---
+function confirmAction(title, message) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay';
+    overlay.innerHTML = `
+      <div class="confirm-dialog">
+        <h3>${title}</h3>
+        <p>${message}</p>
+        <div class="confirm-actions">
+          <button class="confirm-cancel">Cancel</button>
+          <button class="confirm-delete">Delete</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.confirm-cancel').addEventListener('click', () => { overlay.remove(); resolve(false); });
+    overlay.querySelector('.confirm-delete').addEventListener('click', () => { overlay.remove(); resolve(true); });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+  });
 }
 
 // --- Utilities ---
