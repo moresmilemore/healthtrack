@@ -18,7 +18,7 @@ function showAuth() {
 function showApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
-  document.getElementById('user-display').textContent = currentUser || '';
+  document.getElementById('user-display').textContent = displayName(currentUser);
   updateGreeting();
   loadDashboard();
   setupReminders();
@@ -102,6 +102,17 @@ async function checkAuth() {
 }
 
 // --- Greeting ---
+function displayName(username) {
+  if (!username) return '';
+  // Strip email domain and clean up
+  let name = username.split('@')[0];
+  // Remove trailing numbers
+  name = name.replace(/\d+$/, '');
+  // Replace dots/underscores/dashes with spaces and capitalize
+  name = name.replace(/[._-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
+  return name || username;
+}
+
 function updateGreeting() {
   const hour = new Date().getHours();
   let greeting, sub;
@@ -111,7 +122,8 @@ function updateGreeting() {
   else { greeting = 'Good night'; sub = 'Log your day before bed'; }
   const el = document.getElementById('greeting');
   if (el) {
-    el.querySelector('h2').textContent = greeting + (currentUser ? ', ' + currentUser : '');
+    const name = displayName(currentUser);
+    el.querySelector('h2').textContent = name ? greeting + ', ' + name : greeting;
     el.querySelector('p').textContent = sub;
   }
 }
@@ -194,7 +206,7 @@ async function loadDashboard() {
     // Quick med log
     const quickMeds = document.getElementById('dash-quick-meds');
     if (activeMeds.length === 0) {
-      quickMeds.innerHTML = '<div class="empty-state" style="padding:16px"><p>No active medications</p></div>';
+      quickMeds.innerHTML = '<div class="empty-state" style="padding:20px"><p>No active medications</p><p class="empty-hint" onclick="navigateTo(\'meds\')">Go to Meds to add one</p></div>';
     } else {
       quickMeds.innerHTML = activeMeds.map(m => {
         const statusClass = m.todayStatus === 'taken' ? 'quick-med-taken' :
@@ -212,7 +224,7 @@ async function loadDashboard() {
     // Upcoming visits
     const visitsList = document.getElementById('dash-upcoming-visits');
     if (data.upcomingVisits.length === 0) {
-      visitsList.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F3E5}</div><p>No upcoming visits</p></div>';
+      visitsList.innerHTML = '<div class="empty-state" style="padding:24px"><div class="empty-icon">\u{1F3E5}</div><p>No upcoming visits</p><p class="empty-hint" onclick="navigateTo(\'visits\')">Tap to add a doctor visit</p></div>';
     } else {
       visitsList.innerHTML = data.upcomingVisits.map(v => {
         const d = new Date(v.visit_date + 'T00:00:00');
@@ -398,7 +410,7 @@ async function loadMeds() {
 
   const logsList = document.getElementById('med-logs-list');
   if (logs.length === 0) {
-    logsList.innerHTML = '<div class="empty-state"><p>No logs yet</p></div>';
+    logsList.innerHTML = '<div class="empty-state" style="padding:24px"><div class="empty-icon">\u{1F4CB}</div><p>No logs yet</p><p class="empty-hint">Log a medication above to see history here</p></div>';
   } else {
     logsList.innerHTML = logs.slice(0, 10).map(l => {
       const d = new Date(l.taken_at);

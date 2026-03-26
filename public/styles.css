@@ -467,11 +467,11 @@ body {
 .emoji-scale {
   display: flex;
   justify-content: space-between;
-  padding: 10px 0;
+  padding: 6px 0;
 }
 
 .emoji-scale span {
-  font-size: 36px;
+  font-size: 32px;
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
   opacity: 0.35;
@@ -490,7 +490,7 @@ body {
 
 /* Slider */
 .slider-group {
-  margin-bottom: 24px;
+  margin-bottom: 18px;
 }
 
 .slider-group label {
@@ -532,9 +532,9 @@ body {
 }
 
 .form-card h2 {
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 800;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   letter-spacing: -0.3px;
 }
 
@@ -691,20 +691,20 @@ body {
 /* Voice Check-in Button */
 .voice-checkin-btn {
   width: 100%;
-  padding: 16px;
-  border-radius: var(--radius);
+  padding: 12px 16px;
+  border-radius: var(--radius-sm);
   border: 2px dashed var(--primary-light);
   background: linear-gradient(135deg, rgba(108,92,231,0.05), rgba(139,92,246,0.08));
   color: var(--primary);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   font-family: inherit;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  margin-bottom: 20px;
+  gap: 8px;
+  margin-bottom: 14px;
   transition: all 0.2s;
 }
 
@@ -714,8 +714,9 @@ body {
 }
 
 .voice-checkin-btn svg {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
 }
 
 /* FAB */
