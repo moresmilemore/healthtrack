@@ -4,6 +4,102 @@ let medications = [];
 let visits = [];
 let checkins = [];
 let timelineFilter = 'all';
+let authToken = localStorage.getItem('ht_token');
+let currentUser = localStorage.getItem('ht_user');
+
+// --- Auth ---
+let isSignup = false;
+
+function showAuth() {
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+}
+
+function showApp() {
+  document.getElementById('auth-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  document.getElementById('user-display').textContent = currentUser || '';
+  updateGreeting();
+  loadDashboard();
+  setupReminders();
+}
+
+document.getElementById('auth-toggle-btn').addEventListener('click', () => {
+  isSignup = !isSignup;
+  document.getElementById('auth-submit-btn').textContent = isSignup ? 'Create Account' : 'Log In';
+  document.getElementById('auth-toggle-text').textContent = isSignup ? 'Already have an account?' : "Don't have an account?";
+  document.getElementById('auth-toggle-btn').textContent = isSignup ? 'Log In' : 'Sign Up';
+  const errEl = document.querySelector('.auth-error');
+  if (errEl) errEl.classList.remove('visible');
+});
+
+document.getElementById('auth-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const username = document.getElementById('auth-username').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const btn = document.getElementById('auth-submit-btn');
+  btn.disabled = true;
+  btn.textContent = isSignup ? 'Creating...' : 'Logging in...';
+
+  try {
+    const endpoint = isSignup ? '/api/auth/signup' : '/api/auth/login';
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showAuthError(data.error || 'Something went wrong');
+      return;
+    }
+    authToken = data.token;
+    currentUser = data.username;
+    localStorage.setItem('ht_token', authToken);
+    localStorage.setItem('ht_user', currentUser);
+    showApp();
+  } catch (err) {
+    showAuthError('Connection failed. Try again.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = isSignup ? 'Create Account' : 'Log In';
+  }
+});
+
+function showAuthError(msg) {
+  let errEl = document.querySelector('.auth-error');
+  if (!errEl) {
+    errEl = document.createElement('div');
+    errEl.className = 'auth-error';
+    document.getElementById('auth-form').prepend(errEl);
+  }
+  errEl.textContent = msg;
+  errEl.classList.add('visible');
+}
+
+function logout() {
+  fetch('/api/auth/logout', { method: 'POST', headers: { 'Authorization': 'Bearer ' + authToken } }).catch(() => {});
+  authToken = null;
+  currentUser = null;
+  localStorage.removeItem('ht_token');
+  localStorage.removeItem('ht_user');
+  showAuth();
+}
+
+// Check existing session on load
+async function checkAuth() {
+  if (!authToken) { showAuth(); return; }
+  try {
+    const res = await fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + authToken } });
+    if (!res.ok) { showAuth(); return; }
+    const data = await res.json();
+    currentUser = data.username;
+    localStorage.setItem('ht_user', currentUser);
+    showApp();
+  } catch {
+    showAuth();
+  }
+}
 
 // --- Greeting ---
 function updateGreeting() {
@@ -15,18 +111,18 @@ function updateGreeting() {
   else { greeting = 'Good night'; sub = 'Log your day before bed'; }
   const el = document.getElementById('greeting');
   if (el) {
-    el.querySelector('h2').textContent = greeting;
+    el.querySelector('h2').textContent = greeting + (currentUser ? ', ' + currentUser : '');
     el.querySelector('p').textContent = sub;
   }
 }
-updateGreeting();
 
 // --- API Helpers ---
 async function api(path, method = 'GET', body = null) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  const opts = { method, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (authToken || '') } };
   if (body) opts.body = JSON.stringify(body);
   try {
     const res = await fetch('/api' + path, opts);
+    if (res.status === 401) { showAuth(); throw new Error('Please log in'); }
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || `Request failed (${res.status})`);
@@ -742,10 +838,24 @@ document.querySelectorAll('.filter-chip').forEach(chip => {
   });
 });
 
-// Export
-document.getElementById('export-btn').addEventListener('click', () => {
-  window.location.href = '/api/export';
-  toast('Downloading export...');
+// Export (with auth token)
+document.getElementById('export-btn').addEventListener('click', async () => {
+  try {
+    const res = await fetch('/api/export', { headers: { 'Authorization': 'Bearer ' + (authToken || '') } });
+    if (!res.ok) throw new Error('Export failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'healthtrack-export.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('Export downloaded!', 'success');
+  } catch (err) {
+    toast('Export failed');
+  }
 });
 
 // --- Modal ---
@@ -1059,8 +1169,7 @@ function esc(str) {
 }
 
 // --- Init ---
-loadDashboard();
-setupReminders();
+checkAuth();
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
