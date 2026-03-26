@@ -73,7 +73,7 @@ app.post('/api/auth/signup', async (req, res) => {
     const missing = requireFields(req.body, ['username', 'password']);
     if (missing) return res.status(400).json({ error: `${missing} is required` });
 
-    const { username, password } = req.body;
+    const { username, password, first_name, last_name } = req.body;
     if (username.length < 3) return res.status(400).json({ error: 'Username must be at least 3 characters' });
     if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
 
@@ -84,6 +84,8 @@ app.post('/api/auth/signup', async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
     const result = await db.collection('users').insertOne({
       username: username.toLowerCase(),
+      first_name: (first_name || '').trim() || null,
+      last_name: (last_name || '').trim() || null,
       password_hash: hash,
       created_at: new Date()
     });
@@ -95,7 +97,7 @@ app.post('/api/auth/signup', async (req, res) => {
       expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
     });
 
-    res.json({ token, username: username.toLowerCase() });
+    res.json({ token, username: username.toLowerCase(), first_name: (first_name || '').trim() || null, last_name: (last_name || '').trim() || null });
   } catch (err) {
     res.status(500).json({ error: 'Failed to create account' });
   }
@@ -121,7 +123,7 @@ app.post('/api/auth/login', async (req, res) => {
       expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
     });
 
-    res.json({ token, username: user.username });
+    res.json({ token, username: user.username, first_name: user.first_name || null, last_name: user.last_name || null });
   } catch (err) {
     res.status(500).json({ error: 'Failed to log in' });
   }
@@ -152,9 +154,31 @@ app.get('/api/auth/me', async (req, res) => {
     const user = await db.collection('users').findOne({ _id: session.user_id });
     if (!user) return res.status(401).json({ error: 'User not found' });
 
-    res.json({ username: user.username });
+    res.json({ username: user.username, first_name: user.first_name || null, last_name: user.last_name || null });
   } catch (err) {
     res.status(500).json({ error: 'Auth check failed' });
+  }
+});
+
+// --- Profile Update (requires auth inline) ---
+app.put('/api/auth/profile', async (req, res) => {
+  try {
+    const token = (req.headers.authorization || '').replace('Bearer ', '');
+    if (!token) return res.status(401).json({ error: 'Not authenticated' });
+
+    const db = await getDb();
+    const session = await db.collection('sessions').findOne({ token, expires_at: { $gt: new Date() } });
+    if (!session) return res.status(401).json({ error: 'Session expired' });
+
+    const { first_name, last_name } = req.body;
+    await db.collection('users').updateOne({ _id: session.user_id }, {
+      $set: { first_name: (first_name || '').trim() || null, last_name: (last_name || '').trim() || null }
+    });
+
+    const user = await db.collection('users').findOne({ _id: session.user_id });
+    res.json({ username: user.username, first_name: user.first_name || null, last_name: user.last_name || null });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update profile' });
   }
 });
 
@@ -284,6 +308,8 @@ app.post('/api/medication-logs', auth, async (req, res) => {
     const medOid = parseObjectId(medication_id);
     if (!medOid) return res.status(400).json({ error: 'Valid medication_id is required' });
     const db = await getDb();
+    const med = await db.collection('medications').findOne({ _id: medOid, user_id: req.userId });
+    if (!med) return res.status(404).json({ error: 'Medication not found' });
     const doc = { user_id: req.userId, medication_id: medOid, skipped: skipped ? 1 : 0, notes: notes || null, taken_at: new Date() };
     const result = await db.collection('medication_logs').insertOne(doc);
     res.json({ id: result.insertedId.toString() });
@@ -476,6 +502,118 @@ app.get('/api/export', auth, async (req, res) => {
     res.send(csv);
   } catch (err) {
     res.status(500).json({ error: 'Failed to export data' });
+  }
+});
+
+// --- Voice AI (Gemini) ---
+app.post('/api/voice', auth, async (req, res) => {
+  try {
+    const { transcript } = req.body;
+    if (!transcript || !transcript.trim()) return res.status(400).json({ error: 'No transcript provided' });
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.json({ action: 'fallback', message: 'Voice AI not configured' });
+    }
+
+    const db = await getDb();
+    const meds = await db.collection('medications').find({ user_id: req.userId, active: 1 }).toArray();
+    const today = new Date().toISOString().split('T')[0];
+    const upcomingVisits = await db.collection('doctor_visits').find({ user_id: req.userId, visit_date: { $gte: today } }).sort({ visit_date: 1 }).limit(3).toArray();
+    const lastCheckin = await db.collection('checkins').find({ user_id: req.userId }).sort({ date: -1 }).limit(1).toArray();
+
+    const medsContext = meds.map(m => `- ${m.name}${m.dosage ? ' (' + m.dosage + ')' : ''}${m.time_of_day ? ', ' + m.time_of_day : ''} [id: ${m._id}]`).join('\n');
+    const visitsContext = upcomingVisits.map(v => `- ${v.doctor_name} on ${v.visit_date}${v.visit_time ? ' at ' + v.visit_time : ''}`).join('\n');
+    const checkinContext = lastCheckin.length > 0 ? `Last check-in: ${lastCheckin[0].date}, mood ${lastCheckin[0].mood}/5, energy ${lastCheckin[0].energy}/5` : 'No recent check-ins';
+
+    const systemPrompt = `You are a health tracking voice assistant. Parse the user's voice command and return a JSON action.
+
+Today's date: ${today}
+
+User's active medications:
+${medsContext || '(none)'}
+
+Upcoming visits:
+${visitsContext || '(none)'}
+
+${checkinContext}
+
+Return ONLY valid JSON (no markdown, no backticks) with one of these action types:
+
+1. Log medication taken:
+{"action":"log_med","medication_id":"<id>","skipped":false,"message":"Logged Advil!"}
+
+2. Skip medication:
+{"action":"log_med","medication_id":"<id>","skipped":true,"message":"Skipped Advil"}
+
+3. Add new medication:
+{"action":"add_med","name":"<name>","dosage":"<dosage or empty>","frequency":"<Once daily|Twice daily|Three times daily|As needed|Weekly or empty>","time_of_day":"<Morning|Afternoon|Evening|Bedtime|With meals or empty>","message":"Added Tylenol 500mg!"}
+
+4. Daily check-in:
+{"action":"checkin","mood":<1-5>,"energy":<1-5>,"sleep_quality":<1-5>,"pain_level":<0-10>,"symptoms":"<if mentioned>","notes":"<original transcript>","message":"Check-in saved! Feeling good today."}
+
+5. Add doctor visit:
+{"action":"add_visit","doctor_name":"<name>","specialty":"<if mentioned>","visit_date":"<YYYY-MM-DD>","visit_time":"<HH:MM or null>","location":"<if mentioned>","reason":"<if mentioned>","message":"Visit with Dr. Smith added for tomorrow!"}
+
+6. Navigate to a page:
+{"action":"navigate","page":"<dashboard|meds|visits|checkin|history>","message":"Opening medications"}
+
+7. Conversational reply (health question, greeting, or unclear command):
+{"action":"reply","message":"<helpful response>"}
+
+Rules:
+- Match medication names fuzzily (e.g., "advil" matches "Advil", "ibu" matches "Ibuprofen")
+- For dates: "tomorrow" = next day, "next Monday" = the actual date, etc.
+- For mood words: great/amazing=5, good/fine=4, okay/alright=3, bad/rough=2, terrible/awful=1
+- If the user just says how they feel without explicitly saying "check in", still create a checkin
+- Keep messages short, warm, and encouraging
+- If unsure, use "reply" action with a helpful clarification`;
+
+    const geminiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: transcript }] }],
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 300,
+            responseMimeType: 'application/json'
+          }
+        })
+      }
+    );
+
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      console.error('Gemini API error:', geminiRes.status, errText);
+      let hint = 'Voice AI temporarily unavailable';
+      if (geminiRes.status === 400) hint = 'Gemini API rejected the request';
+      if (geminiRes.status === 403) hint = 'Gemini API key is invalid or expired';
+      if (geminiRes.status === 429) hint = 'Gemini rate limit hit, try again in a moment';
+      return res.json({ action: 'fallback', message: hint });
+    }
+
+    const geminiData = await geminiRes.json();
+    const responseText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!responseText) {
+      console.error('Gemini empty response:', JSON.stringify(geminiData));
+      return res.json({ action: 'fallback', message: 'Gemini returned an empty response' });
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(responseText);
+    } catch (parseErr) {
+      console.error('Gemini JSON parse error:', responseText);
+      return res.json({ action: 'reply', message: responseText });
+    }
+    res.json(parsed);
+  } catch (err) {
+    console.error('Voice AI error:', err.message || err);
+    res.json({ action: 'fallback', message: 'Voice AI error: ' + (err.message || 'unknown') });
   }
 });
 

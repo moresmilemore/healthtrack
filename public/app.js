@@ -29,6 +29,7 @@ document.getElementById('auth-toggle-btn').addEventListener('click', () => {
   document.getElementById('auth-submit-btn').textContent = isSignup ? 'Create Account' : 'Log In';
   document.getElementById('auth-toggle-text').textContent = isSignup ? 'Already have an account?' : "Don't have an account?";
   document.getElementById('auth-toggle-btn').textContent = isSignup ? 'Log In' : 'Sign Up';
+  document.getElementById('signup-fields').style.display = isSignup ? '' : 'none';
   const errEl = document.querySelector('.auth-error');
   if (errEl) errEl.classList.remove('visible');
 });
@@ -43,10 +44,15 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
 
   try {
     const endpoint = isSignup ? '/api/auth/signup' : '/api/auth/login';
+    const payload = { username, password };
+    if (isSignup) {
+      payload.first_name = document.getElementById('auth-first-name').value.trim();
+      payload.last_name = document.getElementById('auth-last-name').value.trim();
+    }
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify(payload)
     });
     const data = await res.json();
     if (!res.ok) {
@@ -57,6 +63,10 @@ document.getElementById('auth-form').addEventListener('submit', async (e) => {
     currentUser = data.username;
     localStorage.setItem('ht_token', authToken);
     localStorage.setItem('ht_user', currentUser);
+    if (data.first_name) localStorage.setItem('ht_first_name', data.first_name);
+    else localStorage.removeItem('ht_first_name');
+    if (data.last_name) localStorage.setItem('ht_last_name', data.last_name);
+    else localStorage.removeItem('ht_last_name');
     showApp();
   } catch (err) {
     showAuthError('Connection failed. Try again.');
@@ -83,6 +93,8 @@ function logout() {
   currentUser = null;
   localStorage.removeItem('ht_token');
   localStorage.removeItem('ht_user');
+  localStorage.removeItem('ht_first_name');
+  localStorage.removeItem('ht_last_name');
   showAuth();
 }
 
@@ -95,6 +107,10 @@ async function checkAuth() {
     const data = await res.json();
     currentUser = data.username;
     localStorage.setItem('ht_user', currentUser);
+    if (data.first_name) localStorage.setItem('ht_first_name', data.first_name);
+    else localStorage.removeItem('ht_first_name');
+    if (data.last_name) localStorage.setItem('ht_last_name', data.last_name);
+    else localStorage.removeItem('ht_last_name');
     showApp();
   } catch {
     showAuth();
@@ -103,6 +119,9 @@ async function checkAuth() {
 
 // --- Greeting ---
 function displayName(username) {
+  const first = localStorage.getItem('ht_first_name');
+  const last = localStorage.getItem('ht_last_name');
+  if (first || last) return [first, last].filter(Boolean).join(' ');
   if (!username) return '';
   // Strip email domain and clean up
   let name = username.split('@')[0];
@@ -183,9 +202,17 @@ function navigateTo(page) {
   else if (page === 'history') loadTimeline();
 }
 
+// --- Skeleton helpers ---
+function showSkeleton(containerId, count = 3) {
+  const el = document.getElementById(containerId);
+  if (el) el.innerHTML = Array.from({ length: count }, () => '<div class="skeleton skeleton-card"></div>').join('');
+}
+
 // --- Dashboard ---
 async function loadDashboard() {
   try {
+    showSkeleton('dash-quick-meds', 2);
+    showSkeleton('dash-upcoming-visits', 2);
     const data = await api('/dashboard');
     const activeMeds = await api('/medications/active');
 
@@ -367,6 +394,8 @@ function drawMoodChart(checkins) {
 // --- Medications ---
 async function loadMeds() {
   try {
+  showSkeleton('meds-list', 3);
+  showSkeleton('med-logs-list', 2);
   medications = await api('/medications');
   const logs = await api('/medication-logs');
 
@@ -566,6 +595,7 @@ document.getElementById('add-med-btn').addEventListener('click', () => {
 // --- Doctor Visits ---
 async function loadVisits() {
   try {
+    showSkeleton('visits-list', 3);
     visits = await api('/visits');
     const list = document.getElementById('visits-list');
     const today = new Date().toISOString().split('T')[0];
@@ -796,6 +826,7 @@ document.getElementById('checkin-form').addEventListener('submit', async (e) => 
 
 async function loadCheckins() {
   try {
+    showSkeleton('checkins-list', 3);
     checkins = await api('/checkins');
     const list = document.getElementById('checkins-list');
     if (checkins.length === 0) {
@@ -835,6 +866,7 @@ async function deleteCheckin(id) {
 // --- History / Timeline ---
 async function loadTimeline() {
   try {
+    showSkeleton('timeline-list', 4);
     const events = await api('/timeline?filter=' + timelineFilter);
     const list = document.getElementById('timeline-list');
 
@@ -945,40 +977,72 @@ if (localStorage.getItem('ht_mic_granted') === '1' && navigator.mediaDevices) {
   }).catch(() => {});
 }
 
+let voiceProcessed = false;
+let voiceTimeout = null;
+
 if (SpeechRecognition) {
   recognition = new SpeechRecognition();
-  recognition.continuous = true;
+  recognition.continuous = false;
   recognition.interimResults = true;
   recognition.lang = 'en-US';
+  recognition.maxAlternatives = 1;
 
   recognition.onresult = (event) => {
-    let transcript = '';
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      transcript += event.results[i][0].transcript;
+    let interim = '';
+    let final = '';
+    for (let i = 0; i < event.results.length; i++) {
+      const t = event.results[i][0].transcript;
+      if (event.results[i].isFinal) {
+        final += t;
+      } else {
+        interim += t;
+      }
     }
-    voiceResult = transcript;
-    document.getElementById('voice-transcript').textContent = transcript;
+    voiceResult = final || interim;
+    document.getElementById('voice-transcript').textContent = voiceResult;
 
-    if (event.results[event.results.length - 1].isFinal) {
-      document.getElementById('voice-status').textContent = 'Processing...';
-      setTimeout(() => processVoiceCommand(voiceResult), 500);
+    if (final && !voiceProcessed) {
+      voiceProcessed = true;
+      clearTimeout(voiceTimeout);
+      try { recognition.stop(); } catch(e) {}
+      document.getElementById('voice-status').textContent = 'Thinking...';
+      processVoiceCommand(final);
     }
   };
 
   recognition.onerror = (e) => {
+    clearTimeout(voiceTimeout);
     if (e.error === 'not-allowed') {
       document.getElementById('voice-status').textContent = 'Mic access denied';
       document.getElementById('voice-transcript').textContent = 'Please allow microphone access in your browser settings';
       micGranted = false;
       localStorage.removeItem('ht_mic_granted');
+      setTimeout(closeVoice, 2500);
+    } else if (e.error === 'no-speech') {
+      document.getElementById('voice-status').textContent = 'No speech detected';
+      document.getElementById('voice-transcript').textContent = 'Tap the mic and try speaking again';
+      setTimeout(closeVoice, 2000);
+    } else if (e.error === 'aborted') {
+      // User cancelled or we stopped it — do nothing
     } else {
-      document.getElementById('voice-status').textContent = 'Could not hear you. Try again.';
+      document.getElementById('voice-status').textContent = 'Could not hear you';
+      setTimeout(closeVoice, 2000);
     }
-    setTimeout(closeVoice, 2000);
   };
 
   recognition.onend = () => {
     document.getElementById('voice-btn').classList.remove('listening');
+    clearTimeout(voiceTimeout);
+    // If recognition ended without processing (e.g. silence timeout), use whatever we have
+    if (!voiceProcessed && voiceResult.trim()) {
+      voiceProcessed = true;
+      document.getElementById('voice-status').textContent = 'Thinking...';
+      processVoiceCommand(voiceResult.trim());
+    } else if (!voiceProcessed) {
+      document.getElementById('voice-status').textContent = 'No speech detected';
+      document.getElementById('voice-transcript').textContent = 'Tap the mic and try again';
+      setTimeout(closeVoice, 2000);
+    }
   };
 }
 
@@ -995,142 +1059,152 @@ document.getElementById('voice-cancel').addEventListener('click', closeVoice);
 
 function openVoice() {
   voiceResult = '';
+  voiceProcessed = false;
+  clearTimeout(voiceTimeout);
   document.getElementById('voice-overlay').classList.add('active');
   document.getElementById('voice-status').textContent = 'Listening...';
   document.getElementById('voice-transcript').textContent = '"I took my Advil"\n"Feeling great, energy 4"\n"Doctor appointment tomorrow"\n"Add medication Tylenol 500mg"\n"Show my visits"';
   document.getElementById('voice-confirm').style.display = 'none';
   document.getElementById('voice-btn').classList.add('listening');
-  recognition.start();
+  try { recognition.start(); } catch(e) {
+    // Already running, restart
+    try { recognition.stop(); } catch(e2) {}
+    setTimeout(() => { try { recognition.start(); } catch(e3) {} }, 200);
+  }
+  // Safety timeout: if nothing happens in 15s, close
+  voiceTimeout = setTimeout(() => {
+    if (!voiceProcessed) {
+      if (voiceResult.trim()) {
+        voiceProcessed = true;
+        document.getElementById('voice-status').textContent = 'Thinking...';
+        try { recognition.stop(); } catch(e) {}
+        processVoiceCommand(voiceResult.trim());
+      } else {
+        document.getElementById('voice-status').textContent = 'No speech detected';
+        setTimeout(closeVoice, 1500);
+      }
+    }
+  }, 15000);
 }
 
 function closeVoice() {
+  clearTimeout(voiceTimeout);
   document.getElementById('voice-overlay').classList.remove('active');
   document.getElementById('voice-btn').classList.remove('listening');
   try { recognition.stop(); } catch(e) {}
 }
 
 async function processVoiceCommand(text) {
-  const lower = text.toLowerCase().trim();
+  const status = document.getElementById('voice-status');
+  const transcriptEl = document.getElementById('voice-transcript');
+  status.textContent = 'Thinking...';
+  transcriptEl.textContent = text;
 
-  // --- Log medication (various phrases) ---
-  if (lower.includes('log') || lower.includes('took') || lower.includes('take') || lower.includes('taken')) {
-    const meds = await api('/medications');
-    let matched = null;
-    for (const m of meds) {
-      if (lower.includes(m.name.toLowerCase())) {
-        matched = m;
-        break;
-      }
-    }
-    if (matched) {
-      const skipped = lower.includes('skip');
-      await api('/medication-logs', 'POST', { medication_id: matched.id, skipped });
-      document.getElementById('voice-status').textContent = skipped ? `Skipped ${matched.name}` : `Logged ${matched.name}!`;
-      setTimeout(() => { closeVoice(); if (currentPage === 'meds') loadMeds(); if (currentPage === 'dashboard') loadDashboard(); }, 1200);
+  try {
+    const res = await fetch('/api/voice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (authToken || '') },
+      body: JSON.stringify({ transcript: text })
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      status.textContent = errData.error || 'Voice AI error';
+      transcriptEl.textContent = 'Check that GEMINI_API_KEY is set in your environment';
+      setTimeout(closeVoice, 3000);
       return;
     }
-  }
 
-  // --- Add medication ---
-  if (lower.includes('add') && (lower.includes('med') || lower.includes('medication'))) {
-    const parts = text.replace(/add\s+(medication|med)\s*/i, '').trim();
-    const dosageMatch = parts.match(/(\d+\s*(?:mg|ml|mcg|g|units?))/i);
-    let name = parts;
-    let dosage = '';
-    if (dosageMatch) {
-      dosage = dosageMatch[1];
-      name = parts.replace(dosageMatch[0], '').trim();
-    }
-    if (name) {
-      await api('/medications', 'POST', { name, dosage, frequency: '', time_of_day: '', notes: '' });
-      document.getElementById('voice-status').textContent = `Added ${name}!`;
-      setTimeout(() => { closeVoice(); if (currentPage === 'meds') loadMeds(); }, 1200);
-    }
-    return;
-  }
+    const result = await res.json();
 
-  // --- Check-in ---
-  if (lower.includes('check in') || lower.includes('checkin') || lower.includes('feeling') || lower.includes('how i feel')) {
-    const mood = extractNumber(lower, ['mood']) || 3;
-    const energy = extractNumber(lower, ['energy']) || 3;
-    const sleep = extractNumber(lower, ['sleep']) || 3;
-    const pain = extractNumber(lower, ['pain']) || 0;
-
-    // Also try to detect mood from phrases
-    let detectedMood = mood;
-    if (lower.includes('great') || lower.includes('amazing') || lower.includes('fantastic')) detectedMood = 5;
-    else if (lower.includes('good') || lower.includes('well') || lower.includes('fine')) detectedMood = 4;
-    else if (lower.includes('okay') || lower.includes('ok') || lower.includes('alright')) detectedMood = 3;
-    else if (lower.includes('bad') || lower.includes('rough') || lower.includes('not great')) detectedMood = 2;
-    else if (lower.includes('terrible') || lower.includes('awful') || lower.includes('horrible')) detectedMood = 1;
-
-    await api('/checkins', 'POST', {
-      mood: Math.min(5, Math.max(1, detectedMood)),
-      energy: Math.min(5, Math.max(1, energy)),
-      sleep_quality: Math.min(5, Math.max(1, sleep)),
-      pain_level: Math.min(10, Math.max(0, pain)),
-      symptoms: '',
-      notes: 'Via voice: ' + text
-    });
-    document.getElementById('voice-status').textContent = 'Check-in saved!';
-    setTimeout(() => { closeVoice(); if (currentPage === 'checkin') loadCheckins(); if (currentPage === 'dashboard') loadDashboard(); }, 1200);
-    return;
-  }
-
-  // --- Add visit ---
-  if (lower.includes('visit') || lower.includes('doctor') || lower.includes('appointment')) {
-    const drMatch = text.match(/(?:doctor|dr\.?)\s+(\w+(?:\s+\w+)?)/i);
-    const doctorName = drMatch ? 'Dr. ' + drMatch[1] : 'Doctor Visit';
-    const today = new Date().toISOString().split('T')[0];
-
-    // Try to parse a date
-    let visitDate = today;
-    if (lower.includes('tomorrow')) {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      visitDate = tomorrow.toISOString().split('T')[0];
-    } else if (lower.includes('next week')) {
-      const nextWeek = new Date();
-      nextWeek.setDate(nextWeek.getDate() + 7);
-      visitDate = nextWeek.toISOString().split('T')[0];
+    if (result.action === 'fallback') {
+      status.textContent = result.message || 'Voice AI not available';
+      transcriptEl.textContent = 'Make sure GEMINI_API_KEY is configured';
+      setTimeout(closeVoice, 3000);
+      return;
     }
 
-    await api('/visits', 'POST', {
-      doctor_name: doctorName,
-      specialty: '',
-      visit_date: visitDate,
-      location: '',
-      reason: text,
-      notes: 'Added via voice',
-      follow_up_date: null
-    });
-    document.getElementById('voice-status').textContent = `Visit with ${doctorName} added!`;
-    setTimeout(() => { closeVoice(); if (currentPage === 'visits') loadVisits(); if (currentPage === 'dashboard') loadDashboard(); }, 1200);
-    return;
+    await executeVoiceAction(result);
+  } catch (e) {
+    status.textContent = 'Connection error';
+    transcriptEl.textContent = 'Could not reach the voice server';
+    setTimeout(closeVoice, 3000);
   }
-
-  // --- Navigate ---
-  if (lower.includes('go to') || lower.includes('show') || lower.includes('open')) {
-    if (lower.includes('med')) { closeVoice(); navigateTo('meds'); return; }
-    if (lower.includes('visit') || lower.includes('doctor')) { closeVoice(); navigateTo('visits'); return; }
-    if (lower.includes('check') || lower.includes('feeling')) { closeVoice(); navigateTo('checkin'); return; }
-    if (lower.includes('history') || lower.includes('timeline')) { closeVoice(); navigateTo('history'); return; }
-    if (lower.includes('home') || lower.includes('dash')) { closeVoice(); navigateTo('dashboard'); return; }
-  }
-
-  document.getElementById('voice-status').textContent = "Didn't catch that";
-  document.getElementById('voice-transcript').textContent = 'Try saying:\n"I took my Advil"\n"Feeling great today"\n"Add medication Tylenol"\n"Doctor appointment tomorrow"';
-  setTimeout(closeVoice, 3000);
 }
 
-function extractNumber(text, keywords) {
-  for (const kw of keywords) {
-    const regex = new RegExp(kw + '\\s*(\\d+)', 'i');
-    const match = text.match(regex);
-    if (match) return parseInt(match[1]);
+async function executeVoiceAction(result) {
+  const status = document.getElementById('voice-status');
+  const transcript = document.getElementById('voice-transcript');
+
+  try {
+    switch (result.action) {
+      case 'log_med':
+        await api('/medication-logs', 'POST', { medication_id: result.medication_id, skipped: result.skipped || false });
+        status.textContent = result.message || 'Medication logged!';
+        setTimeout(() => { closeVoice(); if (currentPage === 'meds') loadMeds(); if (currentPage === 'dashboard') loadDashboard(); }, 1200);
+        break;
+
+      case 'add_med':
+        await api('/medications', 'POST', {
+          name: result.name,
+          dosage: result.dosage || '',
+          frequency: result.frequency || '',
+          time_of_day: result.time_of_day || '',
+          notes: ''
+        });
+        status.textContent = result.message || 'Medication added!';
+        setTimeout(() => { closeVoice(); if (currentPage === 'meds') loadMeds(); if (currentPage === 'dashboard') loadDashboard(); }, 1200);
+        break;
+
+      case 'checkin':
+        await api('/checkins', 'POST', {
+          mood: Math.min(5, Math.max(1, result.mood || 3)),
+          energy: Math.min(5, Math.max(1, result.energy || 3)),
+          sleep_quality: Math.min(5, Math.max(1, result.sleep_quality || 3)),
+          pain_level: Math.min(10, Math.max(0, result.pain_level || 0)),
+          symptoms: result.symptoms || '',
+          notes: result.notes || ''
+        });
+        status.textContent = result.message || 'Check-in saved!';
+        setTimeout(() => { closeVoice(); if (currentPage === 'checkin') loadCheckins(); if (currentPage === 'dashboard') loadDashboard(); }, 1200);
+        break;
+
+      case 'add_visit':
+        await api('/visits', 'POST', {
+          doctor_name: result.doctor_name || 'Doctor Visit',
+          specialty: result.specialty || '',
+          visit_date: result.visit_date || new Date().toISOString().split('T')[0],
+          visit_time: result.visit_time || null,
+          location: result.location || '',
+          reason: result.reason || '',
+          notes: 'Added via voice',
+          follow_up_date: null
+        });
+        status.textContent = result.message || 'Visit added!';
+        setTimeout(() => { closeVoice(); if (currentPage === 'visits') loadVisits(); if (currentPage === 'dashboard') loadDashboard(); }, 1200);
+        break;
+
+      case 'navigate':
+        status.textContent = result.message || 'Opening...';
+        setTimeout(() => { closeVoice(); navigateTo(result.page || 'dashboard'); }, 600);
+        break;
+
+      case 'reply':
+        status.textContent = result.message || "I'm here to help!";
+        transcript.textContent = '';
+        setTimeout(closeVoice, 3000);
+        break;
+
+      default:
+        status.textContent = result.message || "Didn't catch that";
+        setTimeout(closeVoice, 2000);
+    }
+  } catch (e) {
+    status.textContent = 'Something went wrong';
+    setTimeout(closeVoice, 2000);
   }
-  return null;
 }
+
 
 // --- Medication Reminders (Notification API) ---
 async function setupReminders() {
@@ -1271,6 +1345,18 @@ function esc(str) {
   div.textContent = str || '';
   return div.innerHTML;
 }
+
+// --- Scroll-aware header ---
+let lastScrollY = 0;
+window.addEventListener('scroll', () => {
+  const header = document.querySelector('.app-header');
+  if (window.scrollY > 10) {
+    header.classList.add('scrolled');
+  } else {
+    header.classList.remove('scrolled');
+  }
+  lastScrollY = window.scrollY;
+}, { passive: true });
 
 // --- Init ---
 checkAuth();
