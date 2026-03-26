@@ -16,7 +16,7 @@
   <div id="app">
     <!-- Header -->
     <header class="app-header">
-      <h1 id="page-title">Dashboard</h1>
+      <h1 id="page-title">HealthTrack</h1>
       <button class="voice-btn" id="voice-btn" aria-label="Voice assistant">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
@@ -34,6 +34,12 @@
           <div class="voice-ring"></div>
           <div class="voice-ring"></div>
           <div class="voice-ring"></div>
+          <svg class="voice-mic-icon" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
         </div>
         <p class="voice-status" id="voice-status">Listening...</p>
         <p class="voice-transcript" id="voice-transcript"></p>
@@ -48,6 +54,27 @@
     <main class="content">
       <!-- Dashboard -->
       <section class="page active" id="page-dashboard">
+        <div class="greeting" id="greeting">
+          <h2>Good morning</h2>
+          <p>How are you feeling today?</p>
+        </div>
+
+        <!-- Voice CTA -->
+        <div class="voice-cta" id="voice-cta" onclick="document.getElementById('voice-btn').click()">
+          <div class="voice-cta-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </div>
+          <div class="voice-cta-text">
+            <h3>Talk to HealthTrack</h3>
+            <p>"I took my Advil" &bull; "Feeling great today" &bull; "Doctor appointment tomorrow"</p>
+          </div>
+        </div>
+
         <div class="dashboard-grid">
           <div class="stat-card mood-card">
             <div class="stat-icon">&#x1F60A;</div>
@@ -79,11 +106,13 @@
           </div>
         </div>
 
-        <div class="section-header">
-          <h2>Weekly Mood Trend</h2>
-        </div>
-        <div class="chart-container">
-          <canvas id="mood-chart" height="160"></canvas>
+        <div id="mood-chart-section">
+          <div class="section-header">
+            <h2>Weekly Mood Trend</h2>
+          </div>
+          <div class="chart-container">
+            <canvas id="mood-chart" height="160"></canvas>
+          </div>
         </div>
 
         <div class="section-header">
@@ -100,6 +129,10 @@
       <!-- Medications -->
       <section class="page" id="page-meds">
         <button class="fab" id="add-med-btn">+</button>
+        <div class="voice-hints" onclick="document.getElementById('voice-btn').click()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+          Try: "Add medication Ibuprofen 200mg" or "I took my Advil"
+        </div>
         <div class="section-header">
           <h2>Active Medications</h2>
         </div>
@@ -114,11 +147,25 @@
       <!-- Doctor Visits -->
       <section class="page" id="page-visits">
         <button class="fab" id="add-visit-btn">+</button>
+        <div class="voice-hints" onclick="document.getElementById('voice-btn').click()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+          Try: "Doctor appointment with Dr. Smith tomorrow"
+        </div>
         <div id="visits-list" class="card-list"></div>
       </section>
 
       <!-- Check-in -->
       <section class="page" id="page-checkin">
+        <button class="voice-checkin-btn" id="voice-checkin-btn" onclick="document.getElementById('voice-btn').click()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+          Voice Check-in &mdash; "I'm feeling great, energy 4, slept well"
+        </button>
+
         <form id="checkin-form" class="form-card">
           <h2>How are you feeling?</h2>
 
@@ -186,7 +233,7 @@
       <section class="page" id="page-history">
         <div class="section-header">
           <h2>Health Timeline</h2>
-          <button class="btn btn-secondary" id="export-btn" style="padding:8px 16px;font-size:13px">Export CSV</button>
+          <button class="btn btn-secondary" id="export-btn" style="padding:10px 18px;font-size:13px;border-radius:50px;font-weight:700">Export CSV</button>
         </div>
 
         <div class="filter-bar">

@@ -5,6 +5,22 @@ let visits = [];
 let checkins = [];
 let timelineFilter = 'all';
 
+// --- Greeting ---
+function updateGreeting() {
+  const hour = new Date().getHours();
+  let greeting, sub;
+  if (hour < 12) { greeting = 'Good morning'; sub = 'Start your day right'; }
+  else if (hour < 17) { greeting = 'Good afternoon'; sub = 'How\'s your day going?'; }
+  else if (hour < 21) { greeting = 'Good evening'; sub = 'Wind down and check in'; }
+  else { greeting = 'Good night'; sub = 'Log your day before bed'; }
+  const el = document.getElementById('greeting');
+  if (el) {
+    el.querySelector('h2').textContent = greeting;
+    el.querySelector('p').textContent = sub;
+  }
+}
+updateGreeting();
+
 // --- API Helpers ---
 async function api(path, method = 'GET', body = null) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
@@ -45,7 +61,8 @@ function navigateTo(page) {
   document.getElementById('page-' + page).classList.add('active');
   document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === page));
 
-  const titles = { dashboard: 'Dashboard', meds: 'Medications', visits: 'Doctor Visits', checkin: 'Check-in', history: 'History' };
+  const titles = { dashboard: 'HealthTrack', meds: 'Medications', visits: 'Doctor Visits', checkin: 'Check-in', history: 'History' };
+  if (page === 'dashboard') updateGreeting();
   document.getElementById('page-title').textContent = titles[page];
 
   // Hide FABs on non-relevant pages
@@ -110,7 +127,7 @@ async function loadDashboard() {
           <div class="card-subtitle">${esc(v.specialty || '')}</div>
           <div class="card-detail">\u{1F4C5} ${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}${diff === 0 ? ' (Today!)' : diff === 1 ? ' (Tomorrow)' : ` (in ${diff} days)`}</div>
           ${v.reason ? `<div class="card-detail">\u{1F4DD} ${esc(v.reason)}</div>` : ''}
-          <div class="card-actions"><button class="btn-take" onclick="addToCalendar('${v.id}')">Add to Calendar</button></div>
+          <div class="card-actions"><button class="btn-calendar" onclick="addToCalendar('${v.id}')">Add to Calendar</button></div>
         </div>`;
       }).join('');
     }
@@ -122,7 +139,14 @@ async function loadDashboard() {
       });
     }
 
-    drawMoodChart(data.recentCheckins.reverse());
+    // Hide chart section if no data
+    const chartSection = document.getElementById('mood-chart-section');
+    if (data.recentCheckins.length < 2) {
+      chartSection.style.display = 'none';
+    } else {
+      chartSection.style.display = 'block';
+      drawMoodChart(data.recentCheckins.reverse());
+    }
   } catch (e) {
     // Toast already shown by api(), just prevent crash
   }
@@ -239,7 +263,7 @@ async function loadMeds() {
 
   const list = document.getElementById('meds-list');
   if (medications.length === 0) {
-    list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F48A}</div><p>No medications yet.<br>Tap + to add one.</p></div>';
+    list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F48A}</div><p>No medications yet</p><p class="empty-hint" onclick="document.getElementById(\'voice-btn\').click()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg> Say "Add medication Ibuprofen" or tap +</p></div>';
   } else {
     list.innerHTML = medications.filter(m => m.active).map(m => `
       <div class="card card-swipeable">
@@ -437,7 +461,7 @@ async function loadVisits() {
     const today = new Date().toISOString().split('T')[0];
 
     if (visits.length === 0) {
-      list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F3E5}</div><p>No visits logged yet.<br>Tap + to add one.</p></div>';
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F3E5}</div><p>No visits logged yet</p><p class="empty-hint" onclick="document.getElementById(\'voice-btn\').click()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg> Say "Appointment with Dr. Smith" or tap +</p></div>';
     } else {
       // Separate upcoming and past
       const upcoming = visits.filter(v => v.visit_date >= today);
@@ -470,7 +494,7 @@ function renderVisitCard(v) {
     ${v.notes ? `<div class="card-detail">\u{1F4AC} ${esc(v.notes)}</div>` : ''}
     ${v.follow_up_date ? `<div class="card-detail">\u{1F501} Follow-up: ${new Date(v.follow_up_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</div>` : ''}
     <div class="card-actions">
-      <button class="btn-take" onclick="addToCalendar('${v.id}')">Add to Calendar</button>
+      <button class="btn-calendar" onclick="addToCalendar('${v.id}')">Add to Calendar</button>
       <button class="btn-edit" onclick="editVisit('${v.id}')">Edit</button>
       <button class="btn-delete" onclick="deleteVisit('${v.id}')">Delete</button>
     </div>
@@ -640,7 +664,7 @@ async function loadCheckins() {
     checkins = await api('/checkins');
     const list = document.getElementById('checkins-list');
     if (checkins.length === 0) {
-      list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F60A}</div><p>No check-ins yet.<br>Log how you\'re feeling above!</p></div>';
+      list.innerHTML = '<div class="empty-state"><div class="empty-icon">\u{1F60A}</div><p>No check-ins yet</p><p class="empty-hint" onclick="document.getElementById(\'voice-btn\').click()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg> Say "I\'m feeling good today" or fill in above</p></div>';
     } else {
       const moodEmojis = ['', '\u{1F629}', '\u{1F61E}', '\u{1F610}', '\u{1F642}', '\u{1F601}'];
       list.innerHTML = checkins.map(c => {
@@ -791,7 +815,7 @@ function openVoice() {
   voiceResult = '';
   document.getElementById('voice-overlay').classList.add('active');
   document.getElementById('voice-status').textContent = 'Listening...';
-  document.getElementById('voice-transcript').textContent = 'Try: "I took my Advil"\n"Check in mood 4 energy 3"\n"Add visit Dr. Smith"';
+  document.getElementById('voice-transcript').textContent = '"I took my Advil"\n"Feeling great, energy 4"\n"Doctor appointment tomorrow"\n"Add medication Tylenol 500mg"\n"Show my visits"';
   document.getElementById('voice-confirm').style.display = 'none';
   document.getElementById('voice-btn').classList.add('listening');
   recognition.start();
@@ -912,8 +936,8 @@ async function processVoiceCommand(text) {
     if (lower.includes('home') || lower.includes('dash')) { closeVoice(); navigateTo('dashboard'); return; }
   }
 
-  document.getElementById('voice-status').textContent = "I didn't understand that.";
-  document.getElementById('voice-transcript').textContent = 'Try: "I took Advil", "Check in feeling good",\nor "Doctor appointment Dr. Smith"';
+  document.getElementById('voice-status').textContent = "Didn't catch that";
+  document.getElementById('voice-transcript').textContent = 'Try saying:\n"I took my Advil"\n"Feeling great today"\n"Add medication Tylenol"\n"Doctor appointment tomorrow"';
   setTimeout(closeVoice, 3000);
 }
 
@@ -966,41 +990,65 @@ async function setupReminders() {
   }, 30 * 60 * 1000);
 }
 
-// --- Calendar Integration ---
+// --- Calendar Integration (iOS-compatible .ics) ---
 function addToCalendar(visitId) {
   const v = visits.find(x => x.id === visitId);
   if (!v) return;
 
   const date = v.visit_date.replace(/-/g, '');
-  const summary = `Dr. Visit: ${v.doctor_name}${v.specialty ? ' (' + v.specialty + ')' : ''}`;
-  const description = [v.reason, v.notes].filter(Boolean).join('\\n');
-  const location = v.location || '';
+  // End date should be next day for all-day events
+  const endDate = new Date(v.visit_date + 'T00:00:00');
+  endDate.setDate(endDate.getDate() + 1);
+  const endStr = endDate.toISOString().split('T')[0].replace(/-/g, '');
 
-  const ics = [
+  const now = new Date();
+  const dtstamp = now.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  const uid = `healthtrack-${visitId}-${Date.now()}@healthtrack.app`;
+
+  const summary = `${v.doctor_name}${v.specialty ? ' - ' + v.specialty : ''}`;
+  const descParts = [v.reason, v.notes].filter(Boolean);
+  const description = descParts.join(' | ').replace(/[,;\\]/g, ' ');
+  const location = (v.location || '').replace(/[,;\\]/g, ' ');
+
+  const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//HealthTrack//EN',
+    'PRODID:-//HealthTrack//HealthTrack//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
     'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTAMP:${dtstamp}`,
     `DTSTART;VALUE=DATE:${date}`,
-    `DTEND;VALUE=DATE:${date}`,
-    `SUMMARY:${summary}`,
-    description ? `DESCRIPTION:${description}` : '',
-    location ? `LOCATION:${location}` : '',
-    v.follow_up_date ? `BEGIN:VALARM\nTRIGGER;VALUE=DATE-TIME:${v.follow_up_date.replace(/-/g, '')}T090000Z\nACTION:DISPLAY\nDESCRIPTION:Follow-up reminder\nEND:VALARM` : '',
-    'END:VEVENT',
-    'END:VCALENDAR'
-  ].filter(Boolean).join('\r\n');
+    `DTEND;VALUE=DATE:${endStr}`,
+    `SUMMARY:${summary}`
+  ];
 
-  const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+  if (description) lines.push(`DESCRIPTION:${description}`);
+  if (location) lines.push(`LOCATION:${location}`);
+
+  // Reminder alarm 1 hour before (9 AM day-of for all-day events)
+  lines.push(
+    'BEGIN:VALARM',
+    'TRIGGER:-PT1H',
+    'ACTION:DISPLAY',
+    `DESCRIPTION:Doctor visit with ${v.doctor_name}`,
+    'END:VALARM'
+  );
+
+  lines.push('END:VEVENT', 'END:VCALENDAR');
+
+  const icsContent = lines.join('\r\n');
+  const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `visit-${v.doctor_name.replace(/\s+/g, '-').toLowerCase()}-${v.visit_date}.ics`;
+  a.download = `${v.doctor_name.replace(/[^a-zA-Z0-9]/g, '-')}-${v.visit_date}.ics`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  toast('Calendar event downloaded!', 'success');
+  toast('Opening in Calendar...', 'success');
 }
 
 // --- Utilities ---
