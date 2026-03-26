@@ -1,0 +1,24 @@
+{
+  "name": "healthtrack",
+  "version": "1.0.0",
+  "description": "Health tracking PWA - medications, doctor visits, daily check-ins with voice assistant",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "health",
+    "tracker",
+    "pwa",
+    "medications"
+  ],
+  "license": "ISC",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "mongodb": "^6.21.0"
+  }
+}

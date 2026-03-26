@@ -1,0 +1,22 @@
+{
+  "name": "HealthTrack",
+  "short_name": "HealthTrack",
+  "description": "Track medications, doctor visits, and daily health",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F8F9FE",
+  "theme_color": "#6C5CE7",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
